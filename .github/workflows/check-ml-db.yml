@@ -2,6 +2,9 @@ name: Mリーグ最新版DBの検証
 
 on:
   workflow_dispatch:
+  push:
+    paths:
+      - 'run-once-report-20261119.txt'
 
 permissions:
   contents: read
@@ -22,6 +25,11 @@ jobs:
 
       - name: 最新公開DBの取得・検証
         run: python scripts/check_latest_db.py --output results
+
+      - name: 検証結果をログに表示
+        if: always()
+        run: |
+          if [ -f results/summary.md ]; then cat results/summary.md; else echo '検証レポート未生成'; fi
 
       - name: 検証レポートを保存（DB本体は保存しない）
         if: always()
