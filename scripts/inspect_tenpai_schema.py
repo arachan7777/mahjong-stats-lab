@@ -84,6 +84,38 @@ def main():
                   ON pts.event_id=ps.event_id AND pts.player_id=ps.player_id
                 WHERE ps.shanten_count=0
                 """).fetchone()
+            result["season2025_furiten_type_counts"]=db.execute("""
+                SELECT
+                    COUNT(*),
+                    SUM(CASE WHEN pts.is_furiten=1 THEN 1 ELSE 0 END),
+                    SUM(CASE WHEN pts.is_discard_furiten=1 THEN 1 ELSE 0 END),
+                    SUM(CASE WHEN pts.is_temporary_furiten=1 THEN 1 ELSE 0 END),
+                    SUM(CASE WHEN pts.is_reach_furiten=1 THEN 1 ELSE 0 END)
+                FROM player_tenpai_state pts
+                JOIN event e ON e.id=pts.event_id
+                JOIN kyoku k ON k.id=e.kyoku_id
+                JOIN game g ON g.id=k.game_id
+                JOIN season_stage ss ON ss.id=g.season_stage_id
+                JOIN league_season ls ON ls.id=ss.league_season_id
+                WHERE ls.start_year=2025
+                """).fetchone()
+            result["compatible_join_2025"]=db.execute("""
+                SELECT COUNT(*),COUNT(DISTINCT ps.event_id)
+                FROM player_state ps
+                JOIN player_tenpai_state pts
+                  ON pts.event_id=ps.event_id AND pts.player_id=ps.player_id
+                JOIN tenpai_agari_matrix m
+                  ON m.event_id=ps.event_id AND m.player_id=ps.player_id
+                JOIN event e ON e.id=ps.event_id
+                JOIN kyoku k ON k.id=e.kyoku_id
+                JOIN game g ON g.id=k.game_id
+                JOIN season_stage ss ON ss.id=g.season_stage_id
+                JOIN league_season ls ON ls.id=ss.league_season_id
+                WHERE ls.start_year=2025
+                    AND ps.shanten_count=0
+                    AND pts.is_furiten=0
+                    AND m.is_ron_agari=1
+                """).fetchone()
             result["matrix_ron_during_furiten"]=scalar(db,"""
                 SELECT COUNT(*) FROM tenpai_agari_matrix m
                 JOIN player_tenpai_state pts
