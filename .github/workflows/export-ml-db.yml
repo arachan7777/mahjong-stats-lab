@@ -1,0 +1,43 @@
+name: Mリーグ検証済みDBの書き出し
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  export:
+    name: 最新DBの検証と一時保存
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: リポジトリ取得
+        uses: actions/checkout@v4
+
+      - name: Python環境
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: 最新DBを取得・検証・書き出し
+        run: python scripts/export_validated_db.py --output export
+
+      - name: 検証レポートを実行ログに表示
+        if: always()
+        run: |
+          if [ -f export/summary.md ]; then cat export/summary.md; fi
+          if [ -f export/summary.json ]; then cat export/summary.json; fi
+
+      - name: 検証済みDBとレポートを成果物に保存
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ml-db-validated-export
+          path: |
+            export/database.sqlite3
+            export/summary.json
+            export/summary.md
+          if-no-files-found: error
+          compression-level: 6
+          retention-days: 1
