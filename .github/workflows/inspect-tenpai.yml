@@ -2,9 +2,6 @@ name: 2025-26 聴牌構造の互換性検証
 
 on:
   workflow_dispatch:
-  push:
-    paths:
-      - 'inspect-once-2-20261119.txt'
 
 permissions:
   contents: read
