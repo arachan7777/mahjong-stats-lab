@@ -2,9 +2,6 @@ name: 2025-26母数・構造互換性検証
 
 on:
   workflow_dispatch:
-  push:
-    paths:
-      - 'check-2025-once-20261119.txt'
 
 permissions:
   contents: read
