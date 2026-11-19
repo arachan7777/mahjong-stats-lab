@@ -1,0 +1,31 @@
+name: 2025-26母数・構造互換性検証
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'check-2025-once-20261119.txt'
+
+permissions:
+  contents: read
+
+jobs:
+  compare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: チェックアウト
+        uses: actions/checkout@v4
+      - name: Python準備
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: 2025-26母数と構造検証
+        run: python scripts/check_2025_baselines.py
+      - name: 結果保存
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: baseline-2025-check
+          path: 2025_schema_report.json
+          retention-days: 7
