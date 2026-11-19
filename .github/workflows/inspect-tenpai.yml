@@ -1,0 +1,32 @@
+name: 2025-26 聴牌構造の互換性検証
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'inspect-once-20261119.txt'
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - name: リポジトリ取得
+        uses: actions/checkout@v4
+      - name: Python環境
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: 昨シーズンと新しい聴牌状態を検証
+        run: python scripts/inspect_tenpai_schema.py
+      - name: 構造検証結果を保存
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: tenpai-schema-check-2025-26
+          path: results/tenpai_schema_check.json
+          if-no-files-found: warn
+          retention-days: 7
