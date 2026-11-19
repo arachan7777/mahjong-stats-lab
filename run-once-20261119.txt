@@ -1,0 +1,2 @@
+MリーグDB最新版の初回検証を1回だけ起動するためのマーカー。
+GitHub Actions の push paths トリガーで実行し、実行後は workflow_dispatch のみへ戻す。
