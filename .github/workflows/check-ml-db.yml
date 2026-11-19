@@ -2,9 +2,6 @@ name: Mリーグ最新版DBの検証
 
 on:
   workflow_dispatch:
-  push:
-    paths:
-      - 'run-once-report-20261119.txt'
 
 permissions:
   contents: read
