@@ -2,9 +2,6 @@ name: Mリーグ検証済みDBの書き出し
 
 on:
   workflow_dispatch:
-  push:
-    paths:
-      - 'export-once-20261119.txt'
 
 permissions:
   contents: read
