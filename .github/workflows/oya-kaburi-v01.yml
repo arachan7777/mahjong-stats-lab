@@ -3,6 +3,8 @@ on:
   push:
     paths:
       - '.github/workflows/oya-kaburi-v01.yml'
+      - 'scripts/rank_oya_kaburi.py'
+      - 'sql/oya_kaburi_rate_index_v01.sql'
   workflow_dispatch:
 permissions:
   contents: read
