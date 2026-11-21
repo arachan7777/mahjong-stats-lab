@@ -20,7 +20,7 @@ jobs:
       - name: 最新SQLite ZIPを取得
         run: |
           set -euo pipefail
-          URL=$(curl -fsSL https://api.github.com/repos/konoui/m-league-game-db/releases/latest | python -c 'import json,sys; print(next(a["browser_download_url"] for a in json.load(sys.stdin)["assets"] if a["name"]=="database.zip"))')
+          URL=https://github.com/konoui/m-league-game-db/releases/latest/download/database.zip
           curl -fL --retry 3 "$URL" -o /tmp/database.zip
           python - <<'PY'
           import zipfile,os
