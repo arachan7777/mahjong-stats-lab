@@ -3,8 +3,9 @@ on:
   push:
     paths:
       - '.github/workflows/dead-wall-confinement-v01.yml'
-      - 'scripts/audit_dead_wall_original_waits.py
-          python -u scripts/rank_dead_wall_confinement.py /tmp/ml.sqlite3'
+      - 'scripts/audit_dead_wall_original_waits.py'
+      - 'scripts/rank_dead_wall_confinement.py'
+      - 'sql/dead_wall_confinement_v01.sql'
   workflow_dispatch:
 permissions:
   contents: read
@@ -41,8 +42,8 @@ jobs:
           print('quick_check:',result)
           assert result=='ok'
           PY
-          python -u scripts/audit_dead_wall_original_waits.py
-          python -u scripts/rank_dead_wall_confinement.py /tmp/ml.sqlite3 /tmp/ml.sqlite3
+          python -u scripts/audit_dead_wall_original_waits.py /tmp/ml.sqlite3
+          python -u scripts/rank_dead_wall_confinement.py /tmp/ml.sqlite3
       - name: ランキング成果物
         if: always()
         uses: actions/upload-artifact@v4
