@@ -98,7 +98,10 @@ def base_points(e):
  if han>=8: return 4000
  if han>=6: return 3000
  if han>=5: return 2000
- return min(e["fu"]*(2**(han+2)),2000)
+ raw=e["fu"]*(2**(han+2))
+ # M-League kiriage mangan: 4han/30fu and 3han/60fu (1920 base)
+ # are rounded up to mangan before dividing into payments.
+ return 2000 if raw>=1920 else raw
 
 bad=[]
 by_payer=Counter()
