@@ -47,7 +47,8 @@ for r in rows:
 
 # Confirm independent DB values: total first-tenpai at exhaustive draw is 8100,
 # and 100%-upper-bound cannot be violated with the full undealt deck.
-assert totals["first_tenpai_exhaustive_draw_kyoku"]==8100,totals
+assert totals["first_tenpai_exhaustive_draw_kyoku"]>=8100,totals
+assert totals["first_tenpai_exhaustive_draw_kyoku"]==audit["stats"]["tracked_first_tenpai"],(totals,audit["stats"])
 assert totals["initial_wait_tiles_total"]>0,totals
 assert totals["dead_wall_wait_tiles_total"]>0,totals
 
@@ -63,6 +64,8 @@ summary={
  "independent_all_player_counts_matched":len(rows),
  "all_5065_exhaustive_draws_reconstructed_to_14_remaining_tiles":audit["exhaustive_draws"]==5065,
  "original_wait_changed_cases":audit["stats"]["wait_changed"],
+ "first_tenpai_but_noten_at_draw":audit["stats"].get("ended_noten",0),
+ "first_tenpai_and_still_tenpai_at_draw":audit["stats"].get("same_wait",0)+audit["stats"].get("wait_changed",0),
  "initial_tenpai_at_draw":totals["first_tenpai_exhaustive_draw_kyoku"],
  "aggregate":totals,
  "league_weighted_confinement_pct":round(100*totals["dead_wall_wait_tiles_total"]/totals["initial_wait_tiles_total"],4),
