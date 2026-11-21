@@ -2,7 +2,7 @@ name: リーチ成就率・全試合ランキング
 on:
   push:
     paths:
-      - '.github/workflows/other-indicators-v04.yml'
+      - '.github/workflows/reach-fulfillment.yml'
   workflow_dispatch:
 permissions:
   contents: read
