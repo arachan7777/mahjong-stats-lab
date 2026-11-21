@@ -72,23 +72,23 @@ for ky,terminal in endby.items():
  assert sum(residual.values())==14,(ky,sum(residual.values()))
  assert all(endcounts[t]<=4 for t in endcounts)
  end_dora=Counter(t for _,typ,t in dora if typ=="omote")
- for pid,z in terminal.items():
-  if z["is_tenpai"]!=1:continue
-  ini=first[ky].get(pid)
-  if ini is None:
-   stats["no_first_own_tenpai"]+=1
+ for pid,ini in first[ky].items():
+  z=terminal.get(pid)
+  if z is None:
+   stats["missing_terminal_player"]+=1
    continue
   waits=set(tiles(ini["waiting_tiles"]))
-  curwait=set(tiles(z["waiting_tiles"]))
+  curwait=set(tiles(z["waiting_tiles"])) if z["is_tenpai"]==1 else set()
   final_physical=sum(residual[t] for t in waits)
   final_visible=sum(end_dora[t] for t in waits)
   final_hidden=final_physical-final_visible
   reconstructed_current=sum(residual[t] for t in curwait)
   current_dora=sum(end_dora[t] for t in curwait)
-  if reconstructed_current != z["available_tile_count"]+z["dora_indicator_tile_count"]:
+  if z["is_tenpai"]==1:
+   if reconstructed_current != z["available_tile_count"]+z["dora_indicator_tile_count"]:
     stats["terminal_reconstruction_not_equal_available_plus_dora"]+=1
     if len(anomalies)<20:anomalies.append({"kyoku_id":ky,"player":pid,"type":"terminal_dora_relation","reconstructed":reconstructed_current,"db_available":z["available_tile_count"],"db_dora":z["dora_indicator_tile_count"],"actual_dora":current_dora})
-  if current_dora!=z["dora_indicator_tile_count"]:
+   if current_dora!=z["dora_indicator_tile_count"]:
     stats["terminal_dora_indicator_discrepancy"]+=1
   recent_dora=Counter(t for order,typ,t in dora if order<=ini["event_order"] and typ=="omote")
   already_drawn=Counter(t for order,t,_ in dlist if order<ini["event_order"])
@@ -99,7 +99,8 @@ for ky,terminal in endby.items():
   den_db=ini["available_tile_count"]
   den_db_dora=ini["dora_indicator_tile_count"]
   stats["tracked_first_tenpai"]+=1
-  if waits!=curwait:stats["wait_changed"]+=1
+  if z["is_tenpai"]!=1:stats["ended_noten"]+=1
+  elif waits!=curwait:stats["wait_changed"]+=1
   else:stats["same_wait"]+=1
   if den_physical<final_physical:
     stats["physical_ratio_over_100"]+=1
