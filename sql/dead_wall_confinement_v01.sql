@@ -86,22 +86,41 @@ visible_dora AS MATERIALIZED (
   JOIN exhaustive_draws ed ON ed.kyoku_id=e.kyoku_id
   WHERE de.dora_type='omote'
 ),
+draw_counts_by_wait AS MATERIALIZED (
+  SELECT w.kyoku_id,w.player_id,w.tile,
+         COUNT(d.event_order) AS all_draw_count,
+         SUM(CASE WHEN d.event_order<w.tenpai_order THEN 1 ELSE 0 END)
+           AS before_tenpai_draw_count
+  FROM original_wait_tiles w
+  LEFT JOIN all_draws d ON d.kyoku_id=w.kyoku_id AND d.tile=w.tile
+  GROUP BY w.kyoku_id,w.player_id,w.tile,w.tenpai_order
+),
+visible_dora_by_wait AS MATERIALIZED (
+  SELECT w.kyoku_id,w.player_id,w.tile,
+         COUNT(v.event_order) AS all_dora_count,
+         SUM(CASE WHEN v.event_order<=w.tenpai_order THEN 1 ELSE 0 END)
+           AS before_tenpai_dora_count
+  FROM original_wait_tiles w
+  LEFT JOIN visible_dora v ON v.kyoku_id=w.kyoku_id AND v.tile=w.tile
+  GROUP BY w.kyoku_id,w.player_id,w.tile,w.tenpai_order
+),
 per_wait_tile AS (
   SELECT w.kyoku_id,w.player_id,w.tile,
-         (4-COALESCE(h.dealt_count,0)
-            -(SELECT COUNT(*) FROM all_draws d
-              WHERE d.kyoku_id=w.kyoku_id AND d.tile=w.tile
-                AND d.event_order<w.tenpai_order)) AS initial_remaining,
-         (4-COALESCE(h.dealt_count,0)
-            -(SELECT COUNT(*) FROM all_draws d
-              WHERE d.kyoku_id=w.kyoku_id AND d.tile=w.tile)) AS final_king_wall,
-         (SELECT COUNT(*) FROM visible_dora v
-           WHERE v.kyoku_id=w.kyoku_id AND v.tile=w.tile
-             AND v.event_order<=w.tenpai_order) AS first_visible_dora,
-         (SELECT COUNT(*) FROM visible_dora v
-           WHERE v.kyoku_id=w.kyoku_id AND v.tile=w.tile) AS final_visible_dora
+         4-COALESCE(h.dealt_count,0)-COALESCE(dc.before_tenpai_draw_count,0)
+           AS initial_remaining,
+         4-COALESCE(h.dealt_count,0)-COALESCE(dc.all_draw_count,0)
+           AS final_king_wall,
+         COALESCE(v.before_tenpai_dora_count,0) AS first_visible_dora,
+         COALESCE(v.all_dora_count,0) AS final_visible_dora
   FROM original_wait_tiles w
-  LEFT JOIN initial_hand_counts h ON h.kyoku_id=w.kyoku_id AND h.tile=w.tile
+  LEFT JOIN initial_hand_counts h
+    ON h.kyoku_id=w.kyoku_id AND h.tile=w.tile
+  JOIN draw_counts_by_wait dc
+    ON dc.kyoku_id=w.kyoku_id AND dc.player_id=w.player_id
+       AND dc.tile=w.tile
+  JOIN visible_dora_by_wait v
+    ON v.kyoku_id=w.kyoku_id AND v.player_id=w.player_id
+       AND v.tile=w.tile
 ),
 by_kyoku AS (
   SELECT player_id,kyoku_id,
