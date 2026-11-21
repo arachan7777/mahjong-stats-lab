@@ -48,6 +48,7 @@ for r in rows:
 # Confirm independent DB values: total first-tenpai at exhaustive draw is 8100,
 # and 100%-upper-bound cannot be violated with the full undealt deck.
 assert totals["first_tenpai_exhaustive_draw_kyoku"]>=8100,totals
+audit=json.loads((out/"dead_wall_original_wait_audit.json").read_text(encoding="utf-8"))
 assert totals["first_tenpai_exhaustive_draw_kyoku"]==audit["stats"]["tracked_first_tenpai"],(totals,audit["stats"])
 assert totals["initial_wait_tiles_total"]>0,totals
 assert totals["dead_wall_wait_tiles_total"]>0,totals
