@@ -1,0 +1,84 @@
+name: 主人公補正率 試算（隔離ブランチ）
+on:
+  push:
+    branches:
+      - trial/protagonist-rate-20261122
+    paths:
+      - '.github/workflows/protagonist-rate-trial.yml'
+      - 'sql/protagonist_rate_v01_trial.sql'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  trial:
+    runs-on: ubuntu-latest
+    timeout-minutes: 100
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: 元DBを一時展開
+        run: |
+          set -euo pipefail
+          curl -fL --retry 3 'https://github.com/konoui/m-league-game-db/releases/latest/download/database.zip' -o /tmp/ml-db.zip
+          python - <<'PY'
+          import zipfile,shutil
+          with zipfile.ZipFile('/tmp/ml-db.zip') as z:
+              files=[x for x in z.infolist() if not x.is_dir() and x.filename.lower().endswith(('.sqlite3','.sqlite','.db','.db3'))]
+              print('candidate_sqlite',[(x.filename,x.file_size) for x in files],flush=True)
+              if len(files)!=1: raise RuntimeError('expected exactly one SQLite file')
+              with z.open(files[0]) as src,open('/tmp/ml.sqlite3','wb') as dst:
+                  shutil.copyfileobj(src,dst)
+          PY
+      - name: 全選手集計と整合性検査
+        run: |
+          python - <<'PY'
+          import csv,json,sqlite3
+          from pathlib import Path
+          out=Path('results');out.mkdir(exist_ok=True)
+          conn=sqlite3.connect('file:/tmp/ml.sqlite3?mode=ro',uri=True)
+          conn.row_factory=sqlite3.Row
+          qc=conn.execute('PRAGMA quick_check').fetchone()[0]
+          if qc!='ok': raise RuntimeError('SQLite quick_check failed: '+str(qc))
+          sql=Path('sql/protagonist_rate_v01_trial.sql').read_text(encoding='utf-8')
+          rows=[dict(r) for r in conn.execute(sql)]
+          if not rows: raise RuntimeError('No player results')
+          cols=list(rows[0])
+          with (out/'protagonist_players.csv').open('w',encoding='utf-8-sig',newline='') as f:
+              w=csv.DictWriter(f,fieldnames=cols);w.writeheader();w.writerows(rows)
+          for r in rows:
+              assert r['protagonist_count']==r['self_protagonist_count']+r['other_protagonist_count'],r
+              assert r['protagonist_count']==sum(r[k] for k in ('second_to_first_count','third_to_first_count','fourth_to_first_count')),r
+              assert r['opportunities']==sum(r[k] for k in ('second_opportunities','third_opportunities','fourth_opportunities')),r
+          summary={
+              'db_games':conn.execute('SELECT COUNT(*) FROM game').fetchone()[0],
+              'south4_games':conn.execute("SELECT COUNT(DISTINCT game_id) FROM kyoku WHERE round='2z4'").fetchone()[0],
+              'south4_zero_honba_games':conn.execute("SELECT COUNT(DISTINCT game_id) FROM kyoku WHERE round='2z4' AND honba_count=0").fetchone()[0],
+              'players':len(rows),
+              'opportunities':sum(r['opportunities'] for r in rows),
+              'successes':sum(r['protagonist_count'] for r in rows),
+              'self_successes':sum(r['self_protagonist_count'] for r in rows),
+              'other_successes':sum(r['other_protagonist_count'] for r in rows),
+              'fourth_to_first':sum(r['fourth_to_first_count'] for r in rows),
+              'opportunities_by_start_rank':{str(n):sum(r[{2:'second',3:'third',4:'fourth'}[n]+'_opportunities'] for r in rows) for n in (2,3,4)},
+              'successes_by_start_rank':{str(n):sum(r[{2:'second',3:'third',4:'fourth'}[n]+'_to_first_count'] for r in rows) for n in (2,3,4)},
+              'rate_pct':round(100*sum(r['protagonist_count'] for r in rows)/sum(r['opportunities'] for r in rows),4),
+              'db_quick_check':qc
+          }
+          assert summary['successes']==summary['self_successes']+summary['other_successes'],summary
+          assert summary['successes']==sum(summary['successes_by_start_rank'].values()),summary
+          (out/'protagonist_summary.json').write_text(json.dumps(summary,ensure_ascii=False,indent=2),encoding='utf-8')
+          (out/'protagonist_top25.json').write_text(json.dumps(rows[:25],ensure_ascii=False,indent=2),encoding='utf-8')
+          print('SUMMARY',json.dumps(summary,ensure_ascii=False),flush=True)
+          print('TOP25',json.dumps(rows[:25],ensure_ascii=False),flush=True)
+          print('VALIDATED aggregate identities',flush=True)
+          PY
+      - name: 検証レポート
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: protagonist-rate-trial
+          path: results/
+          if-no-files-found: warn
+          retention-days: 7
