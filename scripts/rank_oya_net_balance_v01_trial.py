@@ -105,11 +105,14 @@ recent=filtered(2026,"regular")
 sentinel="SELECT p.id AS player_id,p.name AS player_name,b.*"
 assert sql.count(sentinel)==1
 with_sql=sql.split(sentinel)[0]
-diag_sql=with_sql+"SELECT k.kyoku_id,k.game_id,k.player_id,k.before_score,k.score,k.score_delta,\n"+
-"       k.income_points,k.expense_points,k.reconstructed_net,k.audit_diff,\n"+
-"       k.agari_income,k.tenpai_income,k.deal_in_expense,\n"+
-"       k.kaburi_expense,k.noten_expense,k.reach_expense\n"+
-"FROM verified k WHERE k.audit_diff<>0 ORDER BY ABS(k.audit_diff) DESC,k.kyoku_id LIMIT 100"
+diag_sql=with_sql + (
+    "SELECT k.kyoku_id,k.game_id,k.player_id,k.before_score,k.score,k.score_delta,\n"
+    "       k.income_points,k.expense_points,k.reconstructed_net,k.audit_diff,\n"
+    "       k.agari_income,k.tenpai_income,k.deal_in_expense,\n"
+    "       k.kaburi_expense,k.noten_expense,k.reach_expense\n"
+    "FROM verified k WHERE k.audit_diff<>0 "
+    "ORDER BY ABS(k.audit_diff) DESC,k.kyoku_id LIMIT 100"
+)
 diag=select_rows(diag_sql)
 write_csv("oya_net_balance_v01_mismatches.csv",diag)
 write_csv("oya_net_balance_v01_all_players.csv",rows)
