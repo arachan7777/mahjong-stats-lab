@@ -1,0 +1,44 @@
+name: オーラス守護神率 v0.1 試算・第19指標との相補照合
+on:
+  push:
+    branches:
+      - trial/oorasu-guardian-20261123
+    paths:
+      - '.github/workflows/oorasu-guardian-v01-trial.yml'
+      - 'sql/oorasu_guardian_v01_trial.sql'
+      - 'scripts/rank_oorasu_guardian_v01_trial.py'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 100
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: 公開DBの最新SQLiteを一時展開
+        run: |
+          set -euo pipefail
+          curl -fL --retry 3 'https://github.com/konoui/m-league-game-db/releases/latest/download/database.zip' -o /tmp/mahjong-db.zip
+          python - <<'PY'
+          import zipfile,shutil
+          with zipfile.ZipFile('/tmp/mahjong-db.zip') as z:
+              files=[e for e in z.infolist() if not e.is_dir() and e.filename.lower().endswith(('.sqlite3','.sqlite','.db','.db3'))]
+              print('sqlite candidates',[(e.filename,e.file_size) for e in files],flush=True)
+              if len(files)!=1: raise RuntimeError('Expected one SQLite DB')
+              with z.open(files[0]) as src,open('/tmp/mahjong.sqlite3','wb') as dst:
+                  shutil.copyfileobj(src,dst)
+          PY
+      - name: 全選手・旧期間を集計し既存第19指標と照合
+        run: python -u scripts/rank_oorasu_guardian_v01_trial.py /tmp/mahjong.sqlite3
+      - name: 試算CSVと検証記録
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: oorasu-guardian-v01-trial
+          path: results/
+          if-no-files-found: warn
+          retention-days: 7
