@@ -34,8 +34,8 @@ initial_states AS MATERIALIZED (
         psh.thirteen_orphans_shanten_count
  FROM haipai_event h
  JOIN event e ON e.id=h.event_id
- JOIN selected_games sg
-   ON sg.game_id=(SELECT game_id FROM kyoku WHERE id=e.kyoku_id)
+ JOIN kyoku k ON k.id=e.kyoku_id
+ JOIN selected_games sg ON sg.game_id=k.game_id
  JOIN player_state psh ON psh.event_id=h.event_id
    AND psh.player_id=h.actor_player_id
    AND psh.turn_number=0
