@@ -24,6 +24,9 @@ def jsonout(name,o):
  (OUT/name).write_text(json.dumps(o,ensure_ascii=False,indent=2),encoding="utf-8")
 def normalize(t):
  t=t.strip()
+ # 和了牌の原データにはツモ印 t（例: t2s）が先頭に付くことがある。
+ if len(t)==3 and t[0] in ('t','r') and t[1] in '0123456789':
+  t=t[1:]
  return '5'+t[1:] if t.startswith("0") else t
 
 reaches=qry("""
