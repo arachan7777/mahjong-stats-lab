@@ -53,8 +53,8 @@ accepted=query("""
  SELECT re.kyoku_id,re.id AS reach_event_id,re.event_order AS reach_order,
         r.actor_player_id AS player_id
  FROM reach_event r JOIN event re ON re.id=r.event_id
- JOIN ryukyoku_event ry JOIN event ye ON ye.id=ry.event_id
-   ON ye.kyoku_id=re.kyoku_id
+ JOIN event ye ON ye.kyoku_id=re.kyoku_id
+ JOIN ryukyoku_event ry ON ry.event_id=ye.id
  WHERE r.is_accepted=1
  ORDER BY re.kyoku_id,re.event_order
 """)
@@ -65,8 +65,8 @@ flags=query("""
         pts.waiting_tiles,pts.available_tile_count,pts.dora_indicator_tile_count,
         pts.is_actor
  FROM discard_event d JOIN event e ON e.id=d.event_id
- JOIN ryukyoku_event ry JOIN event ye ON ye.id=ry.event_id
-   ON ye.kyoku_id=e.kyoku_id
+ JOIN event ye ON ye.kyoku_id=e.kyoku_id
+ JOIN ryukyoku_event ry ON ry.event_id=ye.id
  LEFT JOIN player_tenpai_state pts
      ON pts.event_id=e.id AND pts.player_id=d.actor_player_id
  WHERE d.is_reach_declaration=1
