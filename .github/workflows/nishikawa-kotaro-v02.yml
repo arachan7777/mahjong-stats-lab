@@ -1,0 +1,42 @@
+name: 保管指標 西川幸太郎指数 Ver.2 全件検証
+on:
+  push:
+    paths:
+      - '.github/workflows/nishikawa-kotaro-v02.yml'
+      - 'scripts/rank_nishikawa_kotaro_v02.py'
+      - 'sql/nishikawa_kotaro_v02.sql'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  ranking:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: 公開DBの最新SQLite ZIP取得と展開
+        run: |
+          set -euo pipefail
+          curl -fL --retry 3 'https://github.com/konoui/m-league-game-db/releases/latest/download/database.zip' -o /tmp/database.zip
+          python - <<'PY'
+          import zipfile,shutil
+          with zipfile.ZipFile('/tmp/database.zip') as z:
+              files=[x for x in z.infolist() if not x.is_dir() and x.filename.lower().endswith(('.sqlite3','.sqlite','.db','.db3'))]
+              print('candidates',[(x.filename,x.file_size) for x in files],flush=True)
+              if len(files)!=1: raise RuntimeError('Expected exactly one SQLite database')
+              with z.open(files[0]) as src,open('/tmp/ml.sqlite3','wb') as dst:
+                  shutil.copyfileobj(src,dst)
+          PY
+      - name: 全56選手と旧基準値を独立再集計
+        run: python -u scripts/rank_nishikawa_kotaro_v02.py /tmp/ml.sqlite3
+      - name: 全件CSVと照合記録
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nishikawa-kotaro-v02-verification
+          path: results/
+          if-no-files-found: warn
+          retention-days: 7
