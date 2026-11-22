@@ -1,0 +1,44 @@
+name: 三万点以上捨てる一打 v0.1 南4放銃トップ陥落の試算
+on:
+  push:
+    branches:
+      - trial/south4-three-man-discard-20261123
+    paths:
+      - '.github/workflows/south4-three-man-discard-v01-trial.yml'
+      - 'sql/south4_three_man_discard_v01_trial.sql'
+      - 'scripts/rank_south4_three_man_discard_v01_trial.py'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 100
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: 公開MリーグDB取得
+        run: |
+          set -euo pipefail
+          curl -fL --retry 3 'https://github.com/konoui/m-league-game-db/releases/latest/download/database.zip' -o /tmp/mleague.zip
+          python - <<'PY'
+          import zipfile,shutil
+          with zipfile.ZipFile('/tmp/mleague.zip') as z:
+              files=[e for e in z.infolist() if not e.is_dir() and e.filename.lower().endswith(('.db','.db3','.sqlite','.sqlite3'))]
+              print('DB candidates',[(e.filename,e.file_size) for e in files],flush=True)
+              if len(files)!=1: raise RuntimeError('Expected exactly one SQLite DB')
+              with z.open(files[0]) as src,open('/tmp/mleague.sqlite3','wb') as dst:
+                  shutil.copyfileobj(src,dst)
+          PY
+      - name: 全南4局のトップ放銃陥落と復帰を検証・集計
+        run: python -u scripts/rank_south4_three_man_discard_v01_trial.py /tmp/mleague.sqlite3
+      - name: 検証記録とCSV・JSON
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: south4-three-man-discard-v01-trial-results
+          path: results/
+          if-no-files-found: warn
+          retention-days: 7
