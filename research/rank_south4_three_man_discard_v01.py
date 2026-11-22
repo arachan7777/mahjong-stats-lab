@@ -189,7 +189,7 @@ summary={
 }
 (out/"three_man_discard_v01_summary.json").write_text(json.dumps(summary,ensure_ascii=False,indent=2)+"\n",encoding="utf-8")
 print("SUMMARY",json.dumps({k:v for k,v in summary.items() if k not in ("rank_top20","events","players")},ensure_ascii=False),flush=True)
-print("TOP20",json.dumps(players[:20],ensure_ascii=False),flush=True)
+print("ALL_PLAYERS",json.dumps(players,ensure_ascii=False),flush=True)
 print("EVENTS",json.dumps(qualified,ensure_ascii=False),flush=True)
 print("AMBIGUOUS",json.dumps(ambiguous[:30],ensure_ascii=False),flush=True)
 print("VERIFIED whole table, south4 rank changes and no-regain, guardian compatibility",flush=True)
