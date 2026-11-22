@@ -1,0 +1,43 @@
+name: 連闘勝率 v0.1 試算・2戦目トップ率と対照比較
+on:
+  push:
+    branches:
+      - trial/rento-win-rate-20261123
+    paths:
+      - '.github/workflows/rento-win-rate-v01-trial.yml'
+      - 'sql/rento_win_rate_v01_trial.sql'
+      - 'scripts/rank_rento_win_rate_v01_trial.py'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 100
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: 公開SQLite原本の取得
+        run: |
+          set -euo pipefail
+          curl -fL --retry 3 'https://github.com/konoui/m-league-game-db/releases/latest/download/database.zip' -o /tmp/mleague.zip
+          python - <<'PY'
+          import zipfile,shutil
+          with zipfile.ZipFile('/tmp/mleague.zip') as z:
+              files=[e for e in z.infolist() if not e.is_dir() and e.filename.lower().endswith(('.db','.db3','.sqlite','.sqlite3'))]
+              print('SQLite files',[(e.filename,e.file_size) for e in files],flush=True)
+              if len(files)!=1: raise RuntimeError('Expected one SQLite database')
+              with z.open(files[0]) as source,open('/tmp/mleague.sqlite3','wb') as target: shutil.copyfileobj(source,target)
+          PY
+      - name: 第1第2試合の連闘者と非連闘者を独立突合して集計
+        run: python -u scripts/rank_rento_win_rate_v01_trial.py /tmp/mleague.sqlite3
+      - name: CSVとJSON結果の保存
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rento-win-rate-v01-trial-results
+          path: results/
+          if-no-files-found: warn
+          retention-days: 7
