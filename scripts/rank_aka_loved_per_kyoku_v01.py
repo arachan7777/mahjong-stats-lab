@@ -199,3 +199,8 @@ jsonout("aka_loved_v01_validation.json",summary)
 jsonout("aka_loved_v01_all_top10.json",rank[:10])
 print("VALIDATION",json.dumps(summary,ensure_ascii=False),flush=True)
 print("TOP10_ALL",json.dumps(rank[:10],ensure_ascii=False),flush=True)
+# 完全ランキングから内川幸太郎選手の位置と比較対象期間を出力
+for period_label,listing in (("ALL",rank),("2025_26",next((query(sql.replace(period,"SELECT 2025 AS start_year, NULL AS stage")) for _ in (0,)),[]))):
+ for i,row in enumerate(listing,1):
+  if row["player_name"]=="内川幸太郎":
+   print("UCHIKAWA",json.dumps({"period":period_label,"rank":i,**row},ensure_ascii=False),flush=True)
