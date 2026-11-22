@@ -119,7 +119,7 @@ visible_dora_by_wait AS MATERIALIZED (
          SUM(CASE WHEN v.event_order<=w.tenpai_order THEN 1 ELSE 0 END)
            AS before_tenpai_dora_count
   FROM original_wait_tiles w
-  LEFT JOIN visible_dora v ON v.kyoku_id=w.kyoku_id AND v.wait_event_id=w.wait_event_id AND v.tile=w.tile
+  LEFT JOIN visible_dora v ON v.kyoku_id=w.kyoku_id AND v.tile=w.tile
   GROUP BY w.kyoku_id,w.player_id,w.wait_event_id,w.tile,w.tenpai_order
 ),
 per_wait_tile AS (
