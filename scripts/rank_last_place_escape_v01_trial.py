@@ -68,7 +68,7 @@ def compare(a: list[dict], p: list[dict]):
             assert abs(expected - row["last_place_escape_pct"]) < .00011, row
         else:
             assert row["last_place_escape_pct"] is None, row
-    assert set(r["player_id"] for r in a) == set(pro), "選手ID集合が一致しない"
+    # 第19指標には2～3着からの機会だけある選手も含まれる。4着経験者は部分集合。\n    assert set(r["player_id"] for r in a).issubset(set(pro)), "第19指標にない選手が含まれる"\n    assert sum(r["last_place_opportunities"] for r in a) == sum(r["fourth_opportunities"] for r in p)\n    assert sum(r["fourth_to_first_count"] for r in a) == sum(r["fourth_to_first_count"] for r in p)
     count = lambda key: sum(row[key] for row in a)
     return {
         "players": len(a),
