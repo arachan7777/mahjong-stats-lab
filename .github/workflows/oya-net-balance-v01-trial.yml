@@ -1,0 +1,43 @@
+name: 親番純収支 v0.1 試算・収入と支出の独立照合
+on:
+  push:
+    branches:
+      - trial/oya-net-balance-20261123
+    paths:
+      - '.github/workflows/oya-net-balance-v01-trial.yml'
+      - 'sql/oya_net_balance_v01_trial.sql'
+      - 'scripts/rank_oya_net_balance_v01_trial.py'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 100
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Mリーグ公開SQLiteの取得
+        run: |
+          set -euo pipefail
+          curl -fL --retry 3 'https://github.com/konoui/m-league-game-db/releases/latest/download/database.zip' -o /tmp/mleague.zip
+          python - <<'PY'
+          import zipfile,shutil
+          with zipfile.ZipFile('/tmp/mleague.zip') as z:
+              files=[e for e in z.infolist() if not e.is_dir() and e.filename.lower().endswith(('.db','.db3','.sqlite','.sqlite3'))]
+              print('SQLite candidates',[(e.filename,e.file_size) for e in files],flush=True)
+              if len(files)!=1: raise RuntimeError('Expected one SQLite database')
+              with z.open(files[0]) as src,open('/tmp/mleague.sqlite3','wb') as dest: shutil.copyfileobj(src,dest)
+          PY
+      - name: 全期間の親番純収支と既存第6指標の点数を照合
+        run: python -u scripts/rank_oya_net_balance_v01_trial.py /tmp/mleague.sqlite3
+      - name: 集計CSV・検証JSON・不一致例を記録
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: oya-net-balance-v01-trial-results
+          path: results/
+          if-no-files-found: warn
+          retention-days: 7
