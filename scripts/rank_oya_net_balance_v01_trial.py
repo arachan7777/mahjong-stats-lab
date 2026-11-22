@@ -150,4 +150,5 @@ for k in ("top_by_total_net","top_by_per_round_min300","bottom_by_total_net","sa
     print(k.upper(),json.dumps(vals,ensure_ascii=False),flush=True)
 if league["audit_mismatches"] or any(x["summary"]["audit_mismatches"] for x in (old,recent)):
     raise RuntimeError(f"親番のイベント積算と局終了時点数の差異が {league['audit_mismatches']} 局。追加調査が必要。")
+print("ALL_PLAYERS",json.dumps(rows,ensure_ascii=False),flush=True)
 print("VALIDATED full parent ledger, every event type, #6 parent kaburi, score changes",flush=True)
