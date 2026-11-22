@@ -1,0 +1,39 @@
+name: 松本吉弘・年度別独自指標と基本スタッツ抽出（隔離検証）
+on:
+  push:
+    paths:
+      - '.github/workflows/matsumoto-profile-20261123.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  extract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Load public database read-only
+        run: |
+          set -euo pipefail
+          curl -fL --retry 3 'https://github.com/konoui/m-league-game-db/releases/download/20261120-2341-04338cbb/database.zip' -o /tmp/database.zip
+          python - <<'PY'
+          import zipfile,shutil
+          z=zipfile.ZipFile('/tmp/database.zip')
+          files=[x for x in z.infolist() if not x.is_dir() and x.filename.endswith(('.sqlite3','.sqlite','.db'))]
+          assert len(files)==1, files
+          with z.open(files[0]) as src,open('/tmp/ml.sqlite3','wb') as dst:
+              shutil.copyfileobj(src,dst)
+          PY
+      - name: Calculate all-year all-stage Matsumoto profile
+        run: python -u scripts/matsumoto_profile_20261123.py /tmp/ml.sqlite3
+      - name: Reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: matsumoto-profile-20261123
+          path: results/
+          if-no-files-found: warn
+          retention-days: 7
