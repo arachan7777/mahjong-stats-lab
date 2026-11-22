@@ -188,7 +188,10 @@ def check_rank(qrows,source,label):
                "ron_dora_total_tiles","kyoku_with_dora_count","max_dora_tiles_in_kyoku"):
    assert x[name]==q[name],(label,p,name,x[name],q[name])
   assert abs(q["dora_loved_per_kyoku"]-round(x["dora_total_tiles"]/x["played_kyoku_count"],4))<.00006
-  assert abs(q["dora_loved_per_100kyoku"]-round(100*x["dora_total_tiles"]/x["played_kyoku_count"],4))<.00006
+  # sqlite ROUND is half-away-from-zero; Python round is bankers rounding.
+  # Exact integer numerator/denominator have already matched above.
+  actual100=100.0*x["dora_total_tiles"]/x["played_kyoku_count"]
+  assert abs(q["dora_loved_per_100kyoku"]-actual100)<.000051,(label,p,"dora100",q["dora_loved_per_100kyoku"],actual100)
   assert abs(q["kyoku_with_dora_pct"]-round(100*x["kyoku_with_dora_count"]/x["played_kyoku_count"],4))<.00006
 
 ranking=qry(sql)
