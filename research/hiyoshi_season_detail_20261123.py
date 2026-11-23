@@ -51,8 +51,8 @@ season_counts=[]
 for y in years:
  g=[x for x in gmap.values() if x["season_year"]==y]
  h=[x for x in g if x["is_hiyoshi"]]
- x=[dict(season=fmt_year(y),season_year=y,total_games=len(g),hiyoshi_games=len(h),
- other_games=len(g)-len(h),hiyoshi_share_pct=round(100*len(h)/len(g),2))]
+ x=dict(season=fmt_year(y),season_year=y,total_games=len(g),hiyoshi_games=len(h),
+ other_games=len(g)-len(h),hiyoshi_share_pct=round(100*len(h)/len(g),2))
  for st in stages:
   gs=[x for x in g if x["stage"]==st]
   x[st+"_games"]=len(gs)
