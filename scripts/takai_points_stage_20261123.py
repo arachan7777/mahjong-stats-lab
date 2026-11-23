@@ -64,9 +64,9 @@ assert sum(z['takai']['games'] for z in annual.values())==282
 assert sum(z['takai']['games'] for z in stages.values())==282
 # Cross-reconcile each stage to per-season totals, exact to 0.1 pt.
 for st in stages:
- assert round(sum(v['takai']['total_pt'] for k,v in ystages.items() if k.endswith(':'+st)),1)==stages[st]['takai']['total_pt']
+ assert round(sum(v['takai']['total_pt'] for k,v in ystages.items() if k.endswith(':'+st) and v['takai'] is not None),1)==stages[st]['takai']['total_pt']
 for y in years:
- assert round(sum(v['takai']['total_pt'] for k,v in ystages.items() if k.startswith(str(y)+':')),1)==annual[str(y)]['takai']['total_pt']
+ assert round(sum(v['takai']['total_pt'] for k,v in ystages.items() if k.startswith(str(y)+':') and v['takai'] is not None),1)==annual[str(y)]['takai']['total_pt']
 ret={'source':'20261120-2341-04338cbb','method':'game_player_result league_points + penalty_league_points, aggregate then round to 0.1', 'meta':meta,'all':allx,
 'annual':annual,'stages':stages,'year_stages':ystages}
 out=Path('results');out.mkdir(exist_ok=True)
