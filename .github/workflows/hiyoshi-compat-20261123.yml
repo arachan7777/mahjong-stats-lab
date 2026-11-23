@@ -32,6 +32,8 @@ jobs:
           PY
       - name: 実況736試合×対局ポイント全選手照合
         run: python -u research/analyze_hiyoshi_compat_20261123.py /tmp/ml.sqlite3
+      - name: 実況736試合×チームポイント収支分析
+        run: python -u research/analyze_hiyoshi_team_compat_20261123.py /tmp/ml.sqlite3
       - name: 全結果保存
         if: always()
         uses: actions/upload-artifact@v4
