@@ -1,0 +1,40 @@
+name: 日向藍子 A/B/C候補 シーズン別精査（隔離研究）
+on:
+  push:
+    branches: [trial/hinata-seasons-20261124]
+    paths:
+      - '.github/workflows/hinata-abc-seasons-20261124.yml'
+      - 'research/hinata_abc_season_probe_20261124.py'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  compute:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: 正式DBを固定版として取得
+        run: |
+          set -euo pipefail
+          curl -fL --retry 3 'https://github.com/konoui/m-league-game-db/releases/download/20261120-2341-04338cbb/database.zip' -o /tmp/database.zip
+          python - <<'PY'
+          import zipfile,shutil
+          with zipfile.ZipFile('/tmp/database.zip') as z:
+            files=[x for x in z.infolist() if not x.is_dir() and x.filename.endswith('.sqlite3')]
+            assert len(files)==1,files
+            with z.open(files[0]) as src,open('/tmp/ml.sqlite3','wb') as dest:shutil.copyfileobj(src,dest)
+          PY
+      - name: 既存指標定義による年別比較（ドンツカ・流局・放銃・和了ドラ）
+        run: python -u research/hinata_abc_season_probe_20261124.py /tmp/ml.sqlite3
+      - name: 計算結果を研究用に保存
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: hinata-abc-seasons-20261124
+          path: results/
+          retention-days: 30
+          if-no-files-found: warn
