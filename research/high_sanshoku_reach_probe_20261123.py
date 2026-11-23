@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """高め三色リーチ実証（隔離研究）
-定義：宣言打牌直後、リーチ成立、聴牌状態が両面2種、
+定義：宣言打牌直後、成立リーチの待ちが2種以上。
 「高め」は数牌の大小ではなく三色が付く高得点側の意味。
-片側の和了には三色同順が付き、反対側の和了には三色同順が付かない。
+一部の待ち牌の和了に三色同順が付き、別の待ち牌には三色同順が付かない。
+単純両面2種のケースは従来の674件に固定照合し、広義の複合待ちも別途計上。
 牌譜のtenpai_agari_matrix/tenpai_yakuを使用。リーチ宣言時点の役だけを判定。
 DBは読み取り専用。公式21独自指標の定義は変更しない。
 """
@@ -65,8 +66,10 @@ for i in range(0,len(pstats),500):
 no_state=[r for r in accepted if (r["discard_id"],r["player_id"]) not in status]
 assert not no_state,(len(no_state),no_state[:3])
 high=[]; both=[]; one_any=[]; misses=[]
-candidate=[r for r in accepted if status[(r["discard_id"],r["player_id"])]["waiting_type"]=="両面"
-           and status[(r["discard_id"],r["player_id"])]["tile_type_count"]==2]
+candidate=[r for r in accepted if status[(r["discard_id"],r["player_id"])]["tile_type_count"]>=2]
+strict_keys={(r["discard_id"],r["player_id"]) for r in candidate
+             if status[(r["discard_id"],r["player_id"])]["waiting_type"]=="両面"
+             and status[(r["discard_id"],r["player_id"])]["tile_type_count"]==2}
 # Each candidate matrix id: yaku mapping for ron + tsumo
 matrix_rows=[]
 ids=[r["discard_id"] for r in candidate]
@@ -88,7 +91,7 @@ for r in candidate:
  st=status[(r["discard_id"],r["player_id"])]
  tiles=[x for x in st["waiting_tiles"].split(",") if x]
  mat=byevt[(r["discard_id"],r["player_id"])]
- if len(tiles)!=2 or len(mat)!=2 or set(tiles)!=set(mat):
+ if len(tiles)<2 or len(mat)!=len(tiles) or set(tiles)!=set(mat):
   misses.append((r,st,dict(mat)));continue
  flags={}
  for t in tiles:
@@ -111,6 +114,8 @@ assert not ambiguous,(len(ambiguous),ambiguous[:10])
 counts=collections.Counter(x["player_name"] for x in accepted)
 rct=collections.Counter(x["player_name"] for x in candidate)
 hct=collections.Counter(x["player_name"] for x in high)
+strict_high=[x for x in high if (x["discard_id"],x["player_id"]) in strict_keys]
+sct=collections.Counter(x["player_name"] for x in strict_high)
 bct=collections.Counter(x["player_name"] for x in both)
 ranks=[]
 for pid,name in players.items():
@@ -120,13 +125,16 @@ for pid,name in players.items():
  ranks.append(dict(player=name,reach_count=n,ryanmen_reach_count=rct[name],
                   high_sanshoku_reach_count=h,
                   high_rate_all_reach_pct=round(h/n*100,4),
+                  strict_ryanmen_high_sanshoku_count=sct[name],
+                  strict_ryanmen_high_rate=round(sct[name]/n*100,4),
                   high_rate_ryanmen_pct=round(h/rct[name]*100,4) if rct[name] else None,
                   sanshoku_both_sides=bct[name]))
 ranks.sort(key=lambda a:(-a["high_rate_all_reach_pct"],-a["high_sanshoku_reach_count"],a["player"]))
 assert sum(r["reach_count"] for r in ranks)==22205
 assert sum(r["high_sanshoku_reach_count"] for r in ranks)==len(high)
+assert len(strict_high)==674,("既検証の両面だけの674件が維持されない",len(strict_high))
 print("AUDIT",json.dumps(dict(reach_total=len(reaches),accepted=len(accepted),
- ryanmen_2wait=len(candidate),high_sanshoku=len(high),both_sanshoku=len(both),
+ ryanmen_2wait=len(candidate),high_sanshoku=len(high),strict_ryanmen_high=len(strict_high),both_sanshoku=len(both),
  none_sanshoku=len(one_any),ambiguous=len(ambiguous),missed_states=len(no_state),
  high_rate_league=round(100*len(high)/len(accepted),4)),ensure_ascii=False),flush=True)
 for name in ["萩原聖人","菅原千瑛","堀慎吾","石橋伸洋","園田賢"]:
@@ -140,7 +148,7 @@ for name in ["萩原聖人","菅原千瑛"]:
  print("FOCUS_BY_SEASON_"+name,json.dumps([dict(season=f"{y}-{(y+1)%100:02d}",reach_count=reyear[y],
   high_sanshoku_count=byyear[y],rate=round(100*byyear[y]/reyear[y],4) if reyear[y] else None)
   for y in sorted(reyear)],ensure_ascii=False),flush=True)
-print("EXCLUDED_MIXED_WAITS",len([x for x in accepted if status[(x["discard_id"],x["player_id"])]["waiting_type"]!="両面"]),flush=True)
+print("EXCLUDED_WAIT_1_TILE",len([x for x in accepted if status[(x["discard_id"],x["player_id"])]["tile_type_count"]<2]),flush=True)
 out=Path("results");out.mkdir(exist_ok=True)
 with (out/"high_sanshoku_reach_players_20261123.csv").open("w",encoding="utf-8-sig",newline="") as f:
  wr=csv.DictWriter(f,fieldnames=list(ranks[0]));wr.writeheader();wr.writerows(ranks)
