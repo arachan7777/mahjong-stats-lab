@@ -149,6 +149,23 @@ for name in ["萩原聖人","菅原千瑛"]:
   high_sanshoku_count=byyear[y],rate=round(100*byyear[y]/reyear[y],4) if reyear[y] else None)
   for y in sorted(reyear)],ensure_ascii=False),flush=True)
 print("EXCLUDED_WAIT_1_TILE",len([x for x in accepted if status[(x["discard_id"],x["player_id"])]["tile_type_count"]<2]),flush=True)
+for name in ["菅原千瑛","萩原聖人"]:
+ bio=[dict(r) for r in con.execute("""
+  SELECT ls.start_year, t.name team_name, COUNT(*) games,
+         SUM(CASE WHEN gr.rank=1 THEN 1 ELSE 0 END) tops,
+         ROUND(SUM(gr.league_points+gr.penalty_league_points),1) pt,
+         MIN(g.date) first_game, MAX(g.date) last_game
+  FROM game_player_result gr JOIN player p ON p.id=gr.player_id
+  JOIN team t ON t.id=gr.team_id
+  JOIN game g ON g.id=gr.game_id
+  JOIN season_stage ss ON ss.id=g.season_stage_id
+  JOIN league_season ls ON ls.id=ss.league_season_id
+  WHERE p.name=?
+  GROUP BY ls.start_year,t.name
+  ORDER BY ls.start_year,t.name
+ """,(name,))]
+ print("BIO_"+name,json.dumps(bio,ensure_ascii=False),flush=True)
+
 out=Path("results");out.mkdir(exist_ok=True)
 with (out/"high_sanshoku_reach_players_20261123.csv").open("w",encoding="utf-8-sig",newline="") as f:
  wr=csv.DictWriter(f,fieldnames=list(ranks[0]));wr.writeheader();wr.writerows(ranks)
