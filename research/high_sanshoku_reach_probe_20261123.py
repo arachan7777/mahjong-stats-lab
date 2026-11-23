@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """高め三色リーチ実証（隔離研究）
 定義：宣言打牌直後、リーチ成立、聴牌状態が両面2種、
+「高め」は数牌の大小ではなく三色が付く高得点側の意味。
 片側の和了には三色同順が付き、反対側の和了には三色同順が付かない。
 牌譜のtenpai_agari_matrix/tenpai_yakuを使用。リーチ宣言時点の役だけを判定。
 DBは読み取り専用。公式21独自指標の定義は変更しない。
@@ -40,7 +41,7 @@ for re in reaches:
  ds=dmap[(re["kyoku_id"],re["player_id"])]
  assert len(ds)==1,(re,ds)
  d=ds[0]
- assert d["discard_order"]<re["reach_order"],(d,re)
+ assert re["reach_order"]<d["discard_order"],(d,re)
  paired.append({**re,**d,"player_name":players[re["player_id"]]})
 assert len(set(r["discard_id"] for r in paired))==len(paired)
 assert sum(x["is_accepted"] for x in paired)==22205, sum(x["is_accepted"] for x in paired)
@@ -63,7 +64,6 @@ for i in range(0,len(pstats),500):
   r=dict(x);status[(r["discard_id"],r["player_id"])]=r
 no_state=[r for r in accepted if (r["discard_id"],r["player_id"]) not in status]
 assert not no_state,(len(no_state),no_state[:3])
-def norm(t):return t.strip().replace("r","")   # Check actual tile format before normalizing.
 high=[]; both=[]; one_any=[]; misses=[]
 candidate=[r for r in accepted if status[(r["discard_id"],r["player_id"])]["waiting_type"]=="両面"
            and status[(r["discard_id"],r["player_id"])]["tile_type_count"]==2]
