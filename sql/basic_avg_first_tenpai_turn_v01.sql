@@ -35,8 +35,8 @@ aggregated AS (
  SELECT period,season_start_year,stage,player_id,player_name,
         COUNT(*) AS event_count, SUM(turn_no) AS turn_total,
         SUM(CASE WHEN turn_no <= 6 THEN 1 ELSE 0 END) AS early_le6,
-        SUM(CASE WHEN event_type='ron' THEN 1 ELSE 0 END) AS ron_count,
-        SUM(CASE WHEN event_type='tsumo' THEN 1 ELSE 0 END) AS tsumo_count
+        SUM(CASE WHEN event_type='haipai' THEN 1 ELSE 0 END) AS haipai_count,
+        SUM(CASE WHEN event_type='discard' THEN 1 ELSE 0 END) AS discard_count
  FROM scoped
  GROUP BY period,season_start_year,stage,player_id,player_name
 ),
@@ -51,7 +51,7 @@ ranking AS (
  WINDOW w AS (PARTITION BY period,season_start_year,stage)
 )
 SELECT period,season_start_year,stage,player_id,player_name,
-       event_count,turn_total,avg_turn,early_le6,ron_count,tsumo_count,
+       event_count,turn_total,avg_turn,early_le6,haipai_count,discard_count,
        league_avg_turn,league_rank,players_with_events
 FROM ranking
 ORDER BY CASE period WHEN 'all' THEN 0 WHEN 'season' THEN 1 WHEN 'stage' THEN 2 ELSE 3 END,
