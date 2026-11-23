@@ -30,3 +30,13 @@ jobs:
           PY
       - name: 保存済み正式SQLで年度別結果を検算
         run: python -u research/hagi_sanshoku_story_season_points.py /tmp/ml.sqlite3
+      - name: 高め三色同順リーチ・宣言時の役マトリックスで全件照合
+        run: python -u research/high_sanshoku_reach_probe_20261123.py /tmp/ml.sqlite3
+      - name: 研究抽出結果を保存
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: hagi-high-sanshoku-reach-probe
+          path: results/
+          retention-days: 30
+          if-no-files-found: warn
