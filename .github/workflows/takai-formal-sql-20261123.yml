@@ -5,6 +5,7 @@ on:
       - trial/takai-agari-junme-20261123
     paths:
       - '.github/workflows/takai-formal-sql-20261123.yml'
+      - 'sql/basic_avg_first_tenpai_turn_v01.sql'
   workflow_dispatch:
 permissions:
   contents: read
