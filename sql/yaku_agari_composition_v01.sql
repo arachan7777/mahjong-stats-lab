@@ -41,13 +41,21 @@ win_events AS (
     JOIN player p ON p.id = a.actor_player_id
 ),
 scoped AS (
-    SELECT 'all' AS scope, NULL AS season_start, NULL AS stage, * FROM win_events
+    SELECT 'all' AS scope, NULL AS season_start, NULL AS stage,
+           w.agari_event_id, w.player_id, w.player_name, w.is_menzen, w.target_yaku_han
+    FROM win_events w
     UNION ALL
-    SELECT 'season' AS scope, season_start, NULL AS stage, * FROM win_events
+    SELECT 'season', w.season_start, NULL,
+           w.agari_event_id, w.player_id, w.player_name, w.is_menzen, w.target_yaku_han
+    FROM win_events w
     UNION ALL
-    SELECT 'stage' AS scope, NULL AS season_start, stage, * FROM win_events
+    SELECT 'stage', NULL, w.stage,
+           w.agari_event_id, w.player_id, w.player_name, w.is_menzen, w.target_yaku_han
+    FROM win_events w
     UNION ALL
-    SELECT 'season_stage' AS scope, season_start, stage, * FROM win_events
+    SELECT 'season_stage', w.season_start, w.stage,
+           w.agari_event_id, w.player_id, w.player_name, w.is_menzen, w.target_yaku_han
+    FROM win_events w
 ),
 aggregated AS (
     SELECT
@@ -61,7 +69,8 @@ aggregated AS (
         SUM(CASE WHEN target_yaku_han IS NOT NULL AND is_menzen = 1 THEN 1 ELSE 0 END) AS target_yaku_menzen_count,
         SUM(CASE WHEN target_yaku_han IS NOT NULL AND is_menzen = 0 THEN 1 ELSE 0 END) AS target_yaku_open_count,
         SUM(CASE WHEN target_yaku_han = 1 THEN 1 ELSE 0 END) AS target_yaku_1han_count,
-        SUM(CASE WHEN target_yaku_han = 2 THEN 1 ELSE 0 END) AS target_yaku_2han_count
+        SUM(CASE WHEN target_yaku_han = 2 THEN 1 ELSE 0 END) AS target_yaku_2han_count,
+        SUM(CASE WHEN target_yaku_han IS NOT NULL AND target_yaku_han NOT IN (1,2) THEN 1 ELSE 0 END) AS target_yaku_other_han_count
     FROM scoped
     GROUP BY scope, season_start, stage, player_id, player_name
 )
@@ -78,7 +87,8 @@ SELECT
     a.target_yaku_menzen_count,
     a.target_yaku_open_count,
     a.target_yaku_1han_count,
-    a.target_yaku_2han_count
+    a.target_yaku_2han_count,
+    a.target_yaku_other_han_count
 FROM aggregated a
 ORDER BY
     CASE a.scope
