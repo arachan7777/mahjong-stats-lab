@@ -1,0 +1,41 @@
+name: 正式共通統計SQL4件・2026-11-20版回帰検証
+on:
+  push:
+    branches:
+      - trial/takai-agari-junme-20261123
+    paths:
+      - '.github/workflows/takai-formal-sql-20261123.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: 2026-11-20固定版DB取得
+        run: |
+          set -euo pipefail
+          curl -fL --retry 3 'https://github.com/konoui/m-league-game-db/releases/download/20261120-2341-04338cbb/database.zip' -o /tmp/database.zip
+          python - <<'PY'
+          import zipfile,shutil
+          with zipfile.ZipFile('/tmp/database.zip') as z:
+              f=[x for x in z.infolist() if not x.is_dir() and x.filename.endswith('.sqlite3')]
+              assert len(f)==1,f
+              with z.open(f[0]) as src,open('/tmp/ml.sqlite3','wb') as dst:
+                  shutil.copyfileobj(src,dst)
+          PY
+      - name: 全4SQLを実行・既知実測値照合
+        run: python -u scripts/verify_takai_formal_sql_20261123.py /tmp/ml.sqlite3
+      - name: 監査結果保存
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: formal-common-stat-sql-audit-20261123
+          path: results/
+          retention-days: 30
+          if-no-files-found: warn
