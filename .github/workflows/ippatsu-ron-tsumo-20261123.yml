@@ -1,0 +1,41 @@
+name: 麻雀スタッツ研究所 リーチ一発率（ロン・ツモ別）研究
+on:
+  push:
+    branches:
+      - trial/ippatsu-ron-tsumo-20261123
+    paths:
+      - '.github/workflows/ippatsu-ron-tsumo-20261123.yml'
+      - 'research/ippatsu_ron_tsumo_20261123.py'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  compute:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: 正式DB固定版を取得
+        run: |
+          set -euo pipefail
+          curl -fL --retry 3 'https://github.com/konoui/m-league-game-db/releases/download/20261120-2341-04338cbb/database.zip' -o /tmp/database.zip
+          python - <<'PY'
+          import zipfile,shutil
+          with zipfile.ZipFile('/tmp/database.zip') as z:
+            fs=[x for x in z.infolist() if not x.is_dir() and x.filename.endswith('.sqlite3')]
+            assert len(fs)==1
+            with z.open(fs[0]) as src,open('/tmp/ml.sqlite3','wb') as dest: shutil.copyfileobj(src,dest)
+          PY
+      - name: 全選手・一発ロンと一発ツモを独立照合
+        run: python -u research/ippatsu_ron_tsumo_20261123.py /tmp/ml.sqlite3
+      - name: 全選手・年度別の集計を出力
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ippatsu-ron-tsumo-20261123
+          path: results/
+          retention-days: 30
+          if-no-files-found: error
