@@ -78,7 +78,7 @@ fields=list(simple(out[0]).keys())
 with (dir/"hiyoshi_compat_20261123.csv").open("w",encoding="utf-8-sig",newline="") as f:
     w=csv.DictWriter(f,fieldnames=fields);w.writeheader();w.writerows(map(simple,all_sorted))
 def table(block,limit=15):
-    return "\n".join(f"| {i} | {x['name']} | {x['h_games']} | {x['h_avg']:+.2f} | {x['other_avg']:+.2f} | {x['delta']:+.2f} | {x['h_top_pct']:.1f}% | {x['top_delta_pp']:+.1f}pt |" for i,x in enumerate(block[:limit],1))
+    return "\n".join(f"| {i} | {x['name']} | {x['h_games']} | {x['h_avg']:+.2f} | {x['other_avg']:+.2f} | {x['delta']:+.2f} | {x['h_top_pct']:.1f}% | {x['top_delta_pp']:+.1f}pt |" for i,x in enumerate(map(simple,block[:limit]),1))
 md=f"""# 日吉辰哉実況の選手別相性（2026-11-20基準）
 
 原典：麻雀スタッツ研究所公式卓外データ（実況欄入力済み全2068試合）と、公式指定DB 20261120-2341-04338cbb を試合IDで結合。
