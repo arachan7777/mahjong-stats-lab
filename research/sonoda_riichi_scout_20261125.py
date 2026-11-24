@@ -60,9 +60,11 @@ for ky,ree in R.items():
   chased=[r for r in acc if r["ord"]>x["ord"] and r["player_id"]!=actor]
   own_ron_dealin=[w for w in win_others if w["type"]=="ron" and w["loser"]==actor]
   self_pts=score[(ky,actor)]
+  reach_turn=sum(d["player_id"]==actor and d["ord"]<=after for d in D[ky])
   entries.append(dict(**base,player_id=actor,player_name=P[actor],reach_id=x["event_id"],
    is_first=int(x["event_id"]==first["event_id"]),
    is_later=int(x["event_id"]!=first["event_id"]),
+   reach_turn=reach_turn,
    first_reacher_id=first["player_id"],
    own_win=int(bool(win_self)),own_ron=int(any(w["type"]=="ron" for w in win_self)),
    own_tsumo=int(any(w["type"]=="tsumo" for w in win_self)),
@@ -92,6 +94,8 @@ def summ(rs):
    followed_by_reach=s("followed_by_riichi"),followed_by_reach_pct=pct("followed_by_riichi"),
    score_total=s("own_points"),score_per_riichi=round(s("own_points")/n,1),
    positive_points=sum(x["own_points"]>0 for x in rs),negative_points=sum(x["own_points"]<0 for x in rs),zero_points=sum(x["own_points"]==0 for x in rs),
+   own_win_tsumo_share_pct=round(100*s("own_tsumo")/s("own_win"),3) if s("own_win") else None,
+   reach_turn_avg=round(s("reach_turn")/n,3),
    self_win_score_total=s("own_win_point_delta"),
    own_dealin_delta_total=s("own_dealin_point_delta"))
 allfirst=[x for x in entries if x["is_first"]]
@@ -106,7 +110,7 @@ def league_player_values(metric,first_only=True,min_count=100):
  vs=[(pid,len(rs),summ(rs)[metric]) for pid,rs in rows.items() if len(rs)>=min_count]
  return sorted(vs,key=lambda x:-x[2])
 ranks={}
-for metric in ("win_pct","other_win_pct","dealin_pct","ryukyoku_pct","followed_by_reach_pct","score_per_riichi"):
+for metric in ("win_pct","other_win_pct","dealin_pct","ryukyoku_pct","followed_by_reach_pct","score_per_riichi","own_win_tsumo_share_pct","reach_turn_avg"):
  v=league_player_values(metric,True,100)
  pos=next((i+1 for i,a in enumerate(v) if a[0]==sonoda_id),None)
  ranks[metric]=dict(rank_desc=pos,n_eligible=len(v),sonoda=summ(sonfirst)[metric],top5=[(P[pid],n,score) for pid,n,score in v[:5]],bottom5=[(P[pid],n,score) for pid,n,score in v[-5:]])
