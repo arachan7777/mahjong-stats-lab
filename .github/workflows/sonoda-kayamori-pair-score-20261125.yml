@@ -1,0 +1,40 @@
+name: 茅森早香・園田賢 リーチ後79局の得失点精算
+on:
+  push:
+    branches: [trial/sonoda-scout-20261124]
+    paths:
+      - '.github/workflows/sonoda-kayamori-pair-score-20261125.yml'
+      - 'research/sonoda_kayamori_pair_score_20261125.py'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  compute:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: 固定版DB読込
+        run: |
+          set -euo pipefail
+          curl -fL --retry 3 'https://github.com/konoui/m-league-game-db/releases/download/20261120-2341-04338cbb/database.zip' -o /tmp/database.zip
+          python - <<'PY'
+          import zipfile,shutil
+          with zipfile.ZipFile('/tmp/database.zip') as z:
+            fs=[i for i in z.infolist() if not i.is_dir() and i.filename.endswith('.sqlite3')]
+            assert len(fs)==1
+            with z.open(fs[0]) as a,open('/tmp/ml.sqlite3','wb') as b:shutil.copyfileobj(a,b)
+          PY
+      - name: 園田先制リーチ局での2選手点差と直接ロンの精算
+        run: python -u research/sonoda_kayamori_pair_score_20261125.py /tmp/ml.sqlite3
+      - name: 検証用結果
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sonoda-kayamori-pair-score-20261125
+          path: results/
+          retention-days: 30
+          if-no-files-found: warn
