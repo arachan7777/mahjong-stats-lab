@@ -1,0 +1,111 @@
+name: 園田賢 副露とリーチ比較・固定版
+on:
+  push:
+    paths:
+      - '.github/workflows/sonoda-furo-analysis.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  ranking:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: 最新SQLite ZIPを取得
+        run: |
+          set -euo pipefail
+          URL=https://github.com/konoui/m-league-game-db/releases/download/20261120-2341-04338cbb/database.zip
+          curl -fL --retry 3 "$URL" -o /tmp/database.zip
+          python - <<'PY'
+          import zipfile,os
+          z=zipfile.ZipFile('/tmp/database.zip')
+          files=[x for x in z.infolist() if not x.is_dir() and (x.filename.endswith('.sqlite3') or x.filename.endswith('.sqlite') or x.filename.endswith('.db'))]
+          print('SQLite candidates:',[(x.filename,x.file_size) for x in files],flush=True)
+          if len(files)!=1: raise RuntimeError('Expected exactly one SQLite database')
+          with z.open(files[0]) as src,open('/tmp/ml.sqlite3','wb') as dst:
+              import shutil
+              shutil.copyfileobj(src,dst)
+          PY
+      - name: 副露率・リーチ率・局収支の比較
+        run: |
+          python - <<'PY'
+          import sqlite3,json,csv
+          from pathlib import Path
+          c=sqlite3.connect('file:/tmp/ml.sqlite3?mode=ro',uri=True)
+          c.row_factory=sqlite3.Row
+          counts={t:c.execute('SELECT count(*) FROM '+t).fetchone()[0] for t in ('game','kyoku','player')}
+          assert counts=={'game':2068,'kyoku':25238,'player':56}, counts
+          assert c.execute('PRAGMA quick_check').fetchone()[0]=='ok'
+          sql="""
+          WITH calls AS MATERIALIZED (
+           SELECT e.kyoku_id,x.actor_player_id AS player_id FROM chi_event x JOIN event e ON e.id=x.event_id
+           UNION SELECT e.kyoku_id,x.actor_player_id FROM pon_event x JOIN event e ON e.id=x.event_id
+           UNION SELECT e.kyoku_id,x.actor_player_id FROM daiminkan_event x JOIN event e ON e.id=x.event_id
+          ),
+          reaches AS MATERIALIZED (
+           SELECT e.kyoku_id,r.actor_player_id AS player_id FROM reach_event r JOIN event e ON e.id=r.event_id WHERE r.is_accepted=1
+          ),
+          wins AS MATERIALIZED (
+           SELECT e.kyoku_id,a.actor_player_id AS player_id FROM agari_event a JOIN event e ON e.id=a.event_id WHERE e.type IN ('ron','tsumo') GROUP BY 1,2
+          ),
+          losses AS MATERIALIZED (
+           SELECT e.kyoku_id,a.target_player_id AS player_id FROM agari_event a JOIN event e ON e.id=a.event_id WHERE e.type='ron' GROUP BY 1,2
+          ),
+          score_seq AS MATERIALIZED (
+           SELECT k.id AS kyoku_id,kpr.player_id,ls.start_year AS season,
+           kpr.score-COALESCE(LAG(kpr.score) OVER(PARTITION BY k.game_id,kpr.player_id ORDER BY k.id),25000) AS net_points
+           FROM kyoku k JOIN kyoku_player_result kpr ON kpr.kyoku_id=k.id
+           JOIN game g ON g.id=k.game_id JOIN season_stage ss ON ss.id=g.season_stage_id JOIN league_season ls ON ls.id=ss.league_season_id
+          )
+          SELECT s.*,p.name,
+           CASE WHEN a.player_id IS NOT NULL THEN 1 ELSE 0 END AS furo,
+           CASE WHEN r.player_id IS NOT NULL THEN 1 ELSE 0 END AS riichi,
+           CASE WHEN w.player_id IS NOT NULL THEN 1 ELSE 0 END AS win,
+           CASE WHEN l.player_id IS NOT NULL THEN 1 ELSE 0 END AS loss
+           FROM score_seq s JOIN player p ON p.id=s.player_id
+           LEFT JOIN calls a ON a.kyoku_id=s.kyoku_id AND a.player_id=s.player_id
+           LEFT JOIN reaches r ON r.kyoku_id=s.kyoku_id AND r.player_id=s.player_id
+           LEFT JOIN wins w ON w.kyoku_id=s.kyoku_id AND w.player_id=s.player_id
+           LEFT JOIN losses l ON l.kyoku_id=s.kyoku_id AND l.player_id=s.player_id
+          """
+          rows=[dict(r) for r in c.execute(sql)]
+          assert len(rows)==4*counts['kyoku']
+          assert len({(r['kyoku_id'],r['player_id']) for r in rows})==len(rows)
+          assert sum(r['riichi'] for r in rows)==22205
+          assert not any(r['furo'] and r['riichi'] for r in rows)
+          son=[r for r in rows if r['name']=='園田賢']
+          assert sum(r['riichi'] for r in son)==794
+          def summ(rs):
+           n=len(rs)
+           f=sum(r['furo'] for r in rs);ri=sum(r['riichi'] for r in rs)
+           pct=lambda x:round(100*x/n,4) if n else None
+           return dict(n=n,furo=f,furo_pct=pct(f),riichi=ri,riichi_pct=pct(ri),other=n-f-ri,other_pct=pct(n-f-ri),win=sum(r['win'] for r in rs),win_pct=pct(sum(r['win'] for r in rs)),loss=sum(r['loss'] for r in rs),loss_pct=pct(sum(r['loss'] for r in rs)),net=sum(r['net_points'] for r in rs),avg_net=round(sum(r['net_points'] for r in rs)/n,2) if n else None)
+          from collections import defaultdict
+          players=defaultdict(list)
+          for r in rows:players[r['name']].append(r)
+          ranked=sorted([dict(name=k,**summ(v)) for k,v in players.items()],key=lambda r:-r['furo']/r['n'])
+          def rank(r,metric):
+           return 1+sum(x[metric]*r['n']>r[metric]*x['n'] for x in ranked)
+          s=summ(son);a=summ(rows)
+          def split(rs):
+           return {k:summ([r for r in rs if fn(r)]) for k,fn in [('furo',lambda r:r['furo']),('riichi',lambda r:r['riichi']),('neither',lambda r:not r['furo'] and not r['riichi'])]}
+          year={str(y):dict(sonoda=summ([r for r in son if r['season']==y]),all=summ([r for r in rows if r['season']==y])) for y in sorted({r['season'] for r in rows})}
+          out=dict(counts=counts,sonoda=s,all=a,rank_furo=rank(s,'furo'),rank_riichi=rank(s,'riichi'),rank_population=len(ranked),top_furo=ranked[:8],bottom_furo=ranked[-5:],sonoda_by_type=split(son),all_by_type=split(rows),year=year)
+          print('TOTAL',json.dumps({k:v for k,v in out.items() if k not in ('year','top_furo','bottom_furo','sonoda_by_type','all_by_type')},ensure_ascii=False),flush=True)
+          for k in ('top_furo','bottom_furo','sonoda_by_type','all_by_type','year'):
+           print(k.upper(),json.dumps(out[k],ensure_ascii=False),flush=True)
+          p=Path('results');p.mkdir(exist_ok=True)
+          (p/'sonoda_furo_comparison.json').write_text(json.dumps(out,ensure_ascii=False,indent=2),encoding='utf-8')
+          with (p/'furo_riichi_ranking.csv').open('w',encoding='utf-8-sig',newline='') as f:
+           w=csv.DictWriter(f,fieldnames=list(ranked[0]));w.writeheader();w.writerows(ranked)
+          PY
+      - name: 研究結果を保存
+        uses: actions/upload-artifact@v4
+        with:
+          name: sonoda-furo-analysis
+          path: results/
+          retention-days: 30
