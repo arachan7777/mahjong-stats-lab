@@ -146,6 +146,20 @@ for year in sorted(set(x["year"] for x in rows)):
 print("YEARLY",json.dumps(annual,ensure_ascii=False),flush=True)
 print("SONODA_CASES",json.dumps([{k:v for k,v in x.items() if k!="details"} for x in rows if x["against_sonoda"]],ensure_ascii=False),flush=True)
 print("SHANTEN_STATE_CHECK",json.dumps(dict(missing=sum(x["k_shanten_at_reach"] is None for x in rows),non_genbutsu_all=sum(x["non_genbutsu_count"] for x in rows)),ensure_ascii=False),flush=True)
+# Control for match-level context: compare other players' first riichi only IN the exact same 32 matches.
+joint_game_ids={x["game_id"] for x in both}
+same_table_sonoda=[x for x in rows if x["game_id"] in joint_game_ids and x["against_sonoda"]]
+same_table_others=[x for x in rows if x["game_id"] in joint_game_ids and not x["against_sonoda"]]
+print("SAME_TABLE_CONTROL",json.dumps(dict(
+ games=len(joint_game_ids),
+ sonoda=summarize(same_table_sonoda),
+ others=summarize(same_table_others),
+ sonoda_not_tenpai=summarize([x for x in same_table_sonoda if x["k_shanten_at_reach"]>0]),
+ others_not_tenpai=summarize([x for x in same_table_others if x["k_shanten_at_reach"]>0]),
+ sonoda_tenpai=summarize([x for x in same_table_sonoda if x["k_shanten_at_reach"]==0]),
+ others_tenpai=summarize([x for x in same_table_others if x["k_shanten_at_reach"]==0]),
+),ensure_ascii=False),flush=True)
+
 Path("results").mkdir(exist_ok=True)
 with Path("results/sonoda_kayamori_reach_exposures_20261124.csv").open("w",encoding="utf-8-sig",newline="") as f:
  fields=[k for k in rows[0] if k!="details"];w=csv.DictWriter(f,fields);w.writeheader();w.writerows({k:v for k,v in x.items() if k!="details"} for x in rows)
