@@ -191,3 +191,57 @@ out=Path("results");out.mkdir(exist_ok=True)
 with (out/"nagai_red_acquisitions_outcomes_20261124.csv").open("w",encoding="utf-8-sig",newline="") as f:
  fields=list(nagai[0]);dw=csv.DictWriter(f,fieldnames=fields);dw.writeheader();dw.writerows(nagai)
 (out/"nagai_red_story_comparison_20261124.json").write_text(json.dumps(base,ensure_ascii=False,indent=2),encoding="utf8")
+
+# 2025-26 / 2026-27: 赤ドラを切ってロン放銃した頻度とランキング。
+# 赤ドラ「取得総数」母数と「実際に切った赤ドラ枚数」母数を明確に区別。
+players={r["id"]:r["name"] for r in q("SELECT id,name FROM player")}
+red_compare=[]
+for yr in (2025,2026):
+ by=collections.defaultdict(list)
+ for r in records:
+  if r["year"]==yr:by[r["player_id"]].append(r)
+ annual=[]
+ for pid,v in by.items():
+  discards=[z for z in v if z["dis_event_id"] is not None]
+  ron_discards=[z for z in discards if z["dealin"]]
+  n=len(v)
+  row=dict(player_id=pid,player_name=players[pid],
+   red_acquired=n,red_discarded=len(discards),red_ron_discard_count=len(ron_discards),
+   red_ron_agari_count=sum(z["dealin_count"] for z in ron_discards),
+   red_ron_loss_points=sum(z["dealin_points"] for z in ron_discards),
+   red_dealin_per_discard_pct=round(100*len(ron_discards)/len(discards),4) if discards else None,
+   red_dealin_per_acquired_pct=round(100*len(ron_discards)/n,4),
+   red_dealin_per_100_discards=round(100*len(ron_discards)/len(discards),4) if discards else None)
+  annual.append(row)
+ total_acquired=sum(z["red_acquired"] for z in annual)
+ total_discarded=sum(z["red_discarded"] for z in annual)
+ total_red_dealin=sum(z["red_ron_discard_count"] for z in annual)
+ total_red_ron_agari=sum(z["red_ron_agari_count"] for z in annual)
+ total_red_ron_loss=sum(z["red_ron_loss_points"] for z in annual)
+ nag=next(z for z in annual if z["player_id"]==49)
+ for col in ["red_ron_discard_count","red_dealin_per_discard_pct","red_dealin_per_acquired_pct","red_ron_loss_points"]:
+  val=nag[col]
+  nag["rank_high_"+col]=1+sum((z[col] or 0)>(val or 0) for z in annual)
+  nag["rank_low_"+col]=1+sum((z[col] or 0)<(val or 0) for z in annual)
+ # Players ranked by red discard/ron frequency with denominator min 20 red discards
+ qual=[z for z in annual if z["red_discarded"]>=20]
+ nag["min20_discards_n"]=len(qual)
+ nag["min20_rank_high_dealin_per_discard_pct"]=1+sum(z["red_dealin_per_discard_pct"]>nag["red_dealin_per_discard_pct"] for z in qual)
+ result=dict(year=yr,players=len(annual),league=dict(
+  red_acquired=total_acquired,red_discarded=total_discarded,
+  red_ron_discard_count=total_red_dealin,red_ron_agari_count=total_red_ron_agari,
+  red_ron_loss_points=total_red_ron_loss,
+  red_dealin_per_discard_pct=round(100*total_red_dealin/total_discarded,4),
+  red_dealin_per_acquired_pct=round(100*total_red_dealin/total_acquired,4)),
+  nagai=nag,top_by_count=sorted(annual,key=lambda z:(-z["red_ron_discard_count"],-z["red_dealin_per_discard_pct"],z["player_name"]))[:10],
+  bottom_by_count=sorted(annual,key=lambda z:(z["red_ron_discard_count"],z["player_name"]))[:10],
+  no_red_ron_dealin_players=sum(z["red_ron_discard_count"]==0 for z in annual),
+  qualified_20_discards=len(qual))
+ red_compare.append(result)
+ print("RED_RON_COMPARISON",json.dumps(result,ensure_ascii=False),flush=True)
+# Cross-check that every red ron discarder was recorded as a physical red discard, no extra.
+for yr in (2025,2026):
+ v=[x for x in records if x["year"]==yr and x["dealin"]]
+ assert all(x["tile"] in ("0m","0p","0s") and x["dis_event_id"] is not None for x in v)
+out=Path("results");out.mkdir(exist_ok=True)
+(out/"nagai_red_dealin_league_comparison_20261124.json").write_text(json.dumps(red_compare,ensure_ascii=False,indent=2)+"\n",encoding="utf8")
