@@ -1,0 +1,40 @@
+name: 茅森早香×園田賢 リーチへの押し返し研究
+on:
+  push:
+    branches: [trial/sonoda-scout-20261124]
+    paths:
+      - '.github/workflows/sonoda-kayamori-reach-push-20261124.yml'
+      - 'research/sonoda_kayamori_push_vs_reach_20261124.py'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  compute:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: 2026-11-20固定DBを読み取り用に取得
+        run: |
+          set -euo pipefail
+          curl -fL --retry 3 'https://github.com/konoui/m-league-game-db/releases/download/20261120-2341-04338cbb/database.zip' -o /tmp/database.zip
+          python - <<'PY'
+          import zipfile,shutil
+          with zipfile.ZipFile('/tmp/database.zip') as z:
+            fs=[i for i in z.infolist() if not i.is_dir() and i.filename.endswith('.sqlite3')]
+            assert len(fs)==1
+            with z.open(fs[0]) as a,open('/tmp/ml.sqlite3','wb') as b:shutil.copyfileobj(a,b)
+          PY
+      - name: 初回リーチ後の打牌・勝敗を比較
+        run: python -u research/sonoda_kayamori_push_vs_reach_20261124.py /tmp/ml.sqlite3
+      - name: 研究用データ保存
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sonoda-kayamori-reach-push-20261124
+          path: results/
+          retention-days: 30
+          if-no-files-found: warn
