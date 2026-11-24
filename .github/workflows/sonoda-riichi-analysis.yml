@@ -1,0 +1,116 @@
+name: 園田賢リーチ分析・固定版
+on:
+  push:
+    paths:
+      - '.github/workflows/sonoda-riichi-analysis.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  ranking:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: 最新SQLite ZIPを取得
+        run: |
+          set -euo pipefail
+          URL=https://github.com/konoui/m-league-game-db/releases/download/20261120-2341-04338cbb/database.zip
+          curl -fL --retry 3 "$URL" -o /tmp/database.zip
+          python - <<'PY'
+          import zipfile,os
+          z=zipfile.ZipFile('/tmp/database.zip')
+          files=[x for x in z.infolist() if not x.is_dir() and (x.filename.endswith('.sqlite3') or x.filename.endswith('.sqlite') or x.filename.endswith('.db'))]
+          print('SQLite candidates:',[(x.filename,x.file_size) for x in files],flush=True)
+          if len(files)!=1: raise RuntimeError('Expected exactly one SQLite database')
+          with z.open(files[0]) as src,open('/tmp/ml.sqlite3','wb') as dst:
+              import shutil
+              shutil.copyfileobj(src,dst)
+          PY
+      - name: 固定版DBの検証とリーチ集計
+        run: |
+          python - <<'PY'
+          import sqlite3,json,csv
+          from pathlib import Path
+          c=sqlite3.connect('file:/tmp/ml.sqlite3?mode=ro',uri=True)
+          c.row_factory=sqlite3.Row
+          counts={t:c.execute('SELECT count(*) FROM '+t).fetchone()[0] for t in ('game','kyoku','player')}
+          print('DB counts:',counts,flush=True)
+          assert counts=={'game':2068,'kyoku':25238,'player':56}, counts
+          assert c.execute('PRAGMA quick_check').fetchone()[0]=='ok'
+          sql="""
+          WITH
+          accepted AS MATERIALIZED (
+           SELECT r.event_id,e.kyoku_id,e.event_order,r.actor_player_id AS player_id,
+           ROW_NUMBER() OVER(PARTITION BY e.kyoku_id ORDER BY e.event_order,e.id) AS reach_rank,
+           COUNT(*) OVER(PARTITION BY e.kyoku_id) AS reach_count
+           FROM reach_event r JOIN event e ON e.id=r.event_id WHERE r.is_accepted=1
+          ),
+          score_sequence AS MATERIALIZED (
+           SELECT k.id AS kyoku_id,kpr.player_id,kpr.score,
+           COALESCE(LAG(kpr.score) OVER(PARTITION BY k.game_id,kpr.player_id ORDER BY k.id),25000) AS before_score
+           FROM kyoku k JOIN kyoku_player_result kpr ON kpr.kyoku_id=k.id
+          ),
+          wins AS MATERIALIZED (
+           SELECT e.kyoku_id,e.event_order,e.type,a.actor_player_id,a.target_player_id
+           FROM agari_event a JOIN event e ON e.id=a.event_id WHERE e.type IN ('ron','tsumo')
+          ),
+          outcomes AS MATERIALIZED (
+           SELECT r.event_id,r.kyoku_id,r.player_id,r.reach_rank,r.reach_count,
+           MAX(CASE WHEN w.actor_player_id=r.player_id AND w.type='tsumo' THEN 1 ELSE 0 END) AS tsumo,
+           MAX(CASE WHEN w.actor_player_id=r.player_id AND w.type='ron' THEN 1 ELSE 0 END) AS ron,
+           MAX(CASE WHEN w.target_player_id=r.player_id AND w.type='ron' THEN 1 ELSE 0 END) AS deal_in,
+           MAX(s.score-s.before_score) AS net_points
+           FROM accepted r LEFT JOIN wins w ON w.kyoku_id=r.kyoku_id AND w.event_order>r.event_order
+           LEFT JOIN score_sequence s ON s.kyoku_id=r.kyoku_id AND s.player_id=r.player_id
+           GROUP BY r.event_id,r.kyoku_id,r.player_id,r.reach_rank,r.reach_count
+          ),
+          scoped AS (
+           SELECT *, '全成立リーチ' AS scope FROM outcomes
+           UNION ALL SELECT *, '先制リーチ' FROM outcomes WHERE reach_rank=1
+           UNION ALL SELECT *, '追っかけリーチ' FROM outcomes WHERE reach_rank>1
+          ),
+          cohorts AS (
+           SELECT s.*,p.name AS cohort FROM scoped s JOIN player p ON p.id=s.player_id
+           UNION ALL SELECT s.*, '全選手' FROM scoped s
+          )
+          SELECT scope,cohort,COUNT(*) AS accepted_reaches,
+           SUM(CASE WHEN tsumo=1 OR ron=1 THEN 1 ELSE 0 END) AS fulfilled,
+           ROUND(100.0*SUM(CASE WHEN tsumo=1 OR ron=1 THEN 1 ELSE 0 END)/COUNT(*),4) AS fulfilled_pct,
+           SUM(tsumo) AS tsumo_count,SUM(ron) AS ron_count,
+           ROUND(100.0*SUM(tsumo)/NULLIF(SUM(tsumo+ron),0),4) AS tsumo_pct_of_wins,
+           ROUND(100.0*SUM(ron)/NULLIF(SUM(tsumo+ron),0),4) AS ron_pct_of_wins,
+           SUM(deal_in) AS deal_in_count,ROUND(100.0*SUM(deal_in)/COUNT(*),4) AS deal_in_pct,
+           SUM(CASE WHEN reach_rank=1 AND reach_count>1 THEN 1 ELSE 0 END) AS chased_count,
+           ROUND(100.0*SUM(CASE WHEN reach_rank=1 AND reach_count>1 THEN 1 ELSE 0 END)/NULLIF(SUM(CASE WHEN reach_rank=1 THEN 1 ELSE 0 END),0),4) AS chased_pct_of_first,
+           COUNT(net_points) AS score_covered_reaches,
+           SUM(net_points) AS total_net_points,ROUND(AVG(net_points),2) AS avg_net_points
+          FROM cohorts GROUP BY scope,cohort ORDER BY scope,cohort
+          """
+          rows=[dict(r) for r in c.execute(sql)]
+          assert all(r['score_covered_reaches']==r['accepted_reaches'] for r in rows)
+          sonoda=lambda r:r['cohort'].replace(' ','').replace('　','')=='園田賢'
+          target=[r for r in rows if sonoda(r) or r['cohort']=='全選手']
+          assert len(target)==6,target
+          for r in target:
+           if sonoda(r):
+            peers=[p for p in rows if p['scope']==r['scope'] and p['cohort']!='全選手']
+            r['rank_fulfilled']=1+sum(p['fulfilled']*r['accepted_reaches']>r['fulfilled']*p['accepted_reaches'] for p in peers)
+            r['rank_population']=len(peers)
+          assert sum(r['accepted_reaches'] for r in target if r['cohort']=='全選手' and r['scope']!='全成立リーチ')==next(r['accepted_reaches'] for r in target if r['cohort']=='全選手' and r['scope']=='全成立リーチ')
+          out=Path('results');out.mkdir(exist_ok=True)
+          (out/'sonoda_riichi.json').write_text(json.dumps({'release':'20261120-2341-04338cbb','counts':counts,'comparison':target},ensure_ascii=False,indent=2),encoding='utf-8')
+          fields=list(dict.fromkeys(k for r in rows for k in r))
+          with (out/'sonoda_riichi_all.csv').open('w',encoding='utf-8-sig',newline='') as f:
+           w=csv.DictWriter(f,fieldnames=fields);w.writeheader();w.writerows(rows)
+          print('SONODA_RESULT',json.dumps(target,ensure_ascii=False),flush=True)
+          PY
+      - name: 集計結果を保存
+        uses: actions/upload-artifact@v4
+        with:
+          name: sonoda-riichi-analysis
+          path: results/
+          retention-days: 7
