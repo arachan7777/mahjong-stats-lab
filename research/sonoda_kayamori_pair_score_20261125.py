@@ -48,9 +48,11 @@ decl=q(f"""SELECT e.kyoku_id,e.event_order ord,d.actor_player_id player_id
  WHERE ky.game_id IN ({qs}) AND d.is_reach_declaration=1""",*ids)
 decls=collections.defaultdict(list)
 for z in decl:decls[z["kyoku_id"]].append(z)
+agari_cols={z["name"] for z in q("PRAGMA table_info(agari_event)")}
+kyotaku_sel="a.kyotaku_points" if "kyotaku_points" in agari_cols else "0"
 wins=q(f"""SELECT e.kyoku_id,e.event_order ord,e.type win_type,
   a.actor_player_id winner,a.target_player_id loser,
-  a.agari_points,a.honba_points,a.kyotaku_points
+  a.agari_points,a.honba_points,{kyotaku_sel} AS kyotaku_points
  FROM agari_event a JOIN event e ON e.id=a.event_id JOIN kyoku ky ON ky.id=e.kyoku_id
  WHERE ky.game_id IN ({qs})""",*ids)
 W=collections.defaultdict(list)
