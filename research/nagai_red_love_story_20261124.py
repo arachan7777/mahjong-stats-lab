@@ -170,9 +170,23 @@ for yr in (2025,2026):
   ss=sorted(qualified,key=lambda v:-v[metric])
   top[metric]=dict(nagai=next(v[metric] for v in rows if v["player_id"]==49),
    rank=next(i for i,v in enumerate(ss,1) if v["player_id"]==49),
-   qualified=len(ss),league_weighted=round(100*sum(v[metric]*v["acq"] for v in rows)/sum(v["acq"] for v in rows),4))
+   qualified=len(ss),league_weighted=round(sum(v[metric]*v["acq"] for v in rows)/sum(v["acq"] for v in rows),4))
  base.append(dict(year=yr,results=top))
 print("BENCHMARK",json.dumps(base,ensure_ascii=False),flush=True)
+# Win-conversion: 赤ドラ有和了数 and red discard -> later own win in same round
+for yr in (2025,2026):
+ own=[w for w in wins if w["winner_id"]==49 and meta[w["kyoku_id"]]["year"]==yr]
+ with_red=[w for w in own if redhan.get(w["event_id"],0)>0]
+ league=[w for w in wins if meta[w["kyoku_id"]]["year"]==yr]
+ red_discard_then_win={x["kyoku_id"] for x in nagai if x["year"]==yr and x["dis_event_id"] is not None and any(w["winner_id"]==49 for w in W[x["kyoku_id"]])}
+ red_tedashi_then_win={x["kyoku_id"] for x in nagai if x["year"]==yr and x["result"] in ("discard_tedashi","discard_ron") and not x["tsumogiri"] and any(w["winner_id"]==49 for w in W[x["kyoku_id"]])}
+ print("WIN_CONVERSION",json.dumps(dict(year=yr,own_win_count=len(own),own_win_with_red_count=len(with_red),
+  own_win_with_red_pct=round(100*len(with_red)/len(own),4),
+  league_win_count=len(league),league_win_with_red_count=sum(redhan.get(w["event_id"],0)>0 for w in league),
+  league_win_with_red_pct=round(100*sum(redhan.get(w["event_id"],0)>0 for w in league)/len(league),4),
+  own_win_after_red_discard_kyoku=len(red_discard_then_win),
+  own_win_after_red_tedashi_kyoku=len(red_tedashi_then_win)),ensure_ascii=False),flush=True)
+
 out=Path("results");out.mkdir(exist_ok=True)
 with (out/"nagai_red_acquisitions_outcomes_20261124.csv").open("w",encoding="utf-8-sig",newline="") as f:
  fields=list(nagai[0]);dw=csv.DictWriter(f,fieldnames=fields);dw.writeheader();dw.writerows(nagai)
