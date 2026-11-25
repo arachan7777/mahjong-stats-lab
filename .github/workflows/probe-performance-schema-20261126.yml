@@ -1,0 +1,25 @@
+name: スタッツ戦績相関の列定義確認（隔離・読取専用）
+on:
+  push:
+    paths:
+      - '.github/workflows/probe-performance-schema-20261126.yml'
+permissions:
+  contents: read
+jobs:
+  query:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fetch pinned DB
+        run: |
+          curl -fL --retry 3 'https://github.com/konoui/m-league-game-db/releases/download/20261120-2341-04338cbb/database.zip' -o /tmp/database.zip
+          python - <<'PY'
+          import zipfile,shutil
+          with zipfile.ZipFile('/tmp/database.zip') as z:
+              files=[i for i in z.infolist() if not i.is_dir() and i.filename.endswith(('.sqlite3','.sqlite','.db'))]
+              assert len(files)==1,files
+              with z.open(files[0]) as src,open('/tmp/ml.sqlite3','wb') as dst:shutil.copyfileobj(src,dst)
+          PY
+      - name: Inspect columns and samples
+        run: python -u scripts/probe_performance_schema_20261126.py /tmp/ml.sqlite3
