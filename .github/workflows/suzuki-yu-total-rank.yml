@@ -1,0 +1,58 @@
+name: 全ステージ単純合算ポイント順位
+on:
+  push:
+    branches: [trial/suzuki-yu-scout-20261125]
+    paths:
+      - '.github/workflows/suzuki-yu-total-rank.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  ranking:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: 最新SQLite ZIPを取得
+        run: |
+          set -euo pipefail
+          URL=https://github.com/konoui/m-league-game-db/releases/download/20261120-2341-04338cbb/database.zip
+          curl -fL --retry 3 "$URL" -o /tmp/database.zip
+          python - <<'PY'
+          import zipfile,os
+          z=zipfile.ZipFile('/tmp/database.zip')
+          files=[x for x in z.infolist() if not x.is_dir() and (x.filename.endswith('.sqlite3') or x.filename.endswith('.sqlite') or x.filename.endswith('.db'))]
+          print('SQLite candidates:',[(x.filename,x.file_size) for x in files],flush=True)
+          if len(files)!=1: raise RuntimeError('Expected exactly one SQLite database')
+          with z.open(files[0]) as src,open('/tmp/ml.sqlite3','wb') as dst:
+              import shutil
+              shutil.copyfileobj(src,dst)
+          PY
+      - name: 正式共通集計SQLで通算順位を検証
+        run: |
+          python - <<'PY'
+          import sqlite3,json
+          from pathlib import Path
+          c=sqlite3.connect('file:/tmp/ml.sqlite3?mode=ro',uri=True);c.row_factory=sqlite3.Row
+          assert c.execute('SELECT count(*) FROM game').fetchone()[0]==2068
+          assert c.execute('SELECT count(*) FROM kyoku').fetchone()[0]==25238
+          rows=[dict(r) for r in c.execute(Path('sql/basic_mleague_points_by_period_v01.sql').read_text(encoding='utf8'))]
+          total=[r for r in rows if r['period']=='all']
+          assert len(total)==56
+          yu=next(r for r in total if r['player_name']=='鈴木優')
+          assert yu['played_games']==153 and yu['total_points']==1203.1
+          print('TOP_TOTAL',json.dumps(sorted(total,key=lambda x:x['rank_total_points'])[:15],ensure_ascii=False),flush=True)
+          print('TOP_AVG',json.dumps(sorted(total,key=lambda x:x['rank_points_per_game'])[:10],ensure_ascii=False),flush=True)
+          print('YU',json.dumps(yu,ensure_ascii=False),flush=True)
+          print('YU_REGULAR',json.dumps([r for r in rows if r['player_name']=='鈴木優' and r['period']=='stage'],ensure_ascii=False),flush=True)
+          p=Path('results');p.mkdir(exist_ok=True);(p/'all_stage_total_rank.json').write_text(json.dumps(total,ensure_ascii=False,indent=2),encoding='utf8')
+          PY
+      - name: 研究結果を保存
+        uses: actions/upload-artifact@v4
+        with:
+          name: all-stage-total-rank
+          path: results/
+          retention-days: 30
