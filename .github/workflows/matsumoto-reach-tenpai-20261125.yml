@@ -1,0 +1,28 @@
+name: 松本吉弘・立直中とテンパイ中の掴み率検証
+on:
+  push:
+    paths:
+      - '.github/workflows/matsumoto-reach-tenpai-20261125.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  extract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - name: Get source DB (pinned, read-only)
+        run: |
+          set -euo pipefail
+          curl -fL --retry 3 'https://github.com/konoui/m-league-game-db/releases/download/20261120-2341-04338cbb/database.zip' -o /tmp/database.zip
+          python - <<'PY'
+          import zipfile,shutil
+          with zipfile.ZipFile('/tmp/database.zip') as z:
+              names=[i for i in z.infolist() if not i.is_dir() and i.filename.endswith(('.sqlite3','.sqlite','.db'))]
+              assert len(names)==1,names
+              with z.open(names[0]) as src,open('/tmp/ml.sqlite3','wb') as dest:
+                  shutil.copyfileobj(src,dest)
+          PY
+      - name: Calculate conditional hit draw rates for Matsumoto
+        run: python -u scripts/matsumoto_reach_tenpai_tsukamu_20261125.py /tmp/ml.sqlite3
