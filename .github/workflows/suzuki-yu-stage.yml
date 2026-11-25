@@ -1,0 +1,108 @@
+name: 鈴木優 レギュラー・ポストシーズン比較
+on:
+  push:
+    branches: [trial/suzuki-yu-scout-20261125]
+    paths:
+      - '.github/workflows/suzuki-yu-stage.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  ranking:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: 最新SQLite ZIPを取得
+        run: |
+          set -euo pipefail
+          URL=https://github.com/konoui/m-league-game-db/releases/download/20261120-2341-04338cbb/database.zip
+          curl -fL --retry 3 "$URL" -o /tmp/database.zip
+          python - <<'PY'
+          import zipfile,os
+          z=zipfile.ZipFile('/tmp/database.zip')
+          files=[x for x in z.infolist() if not x.is_dir() and (x.filename.endswith('.sqlite3') or x.filename.endswith('.sqlite') or x.filename.endswith('.db'))]
+          print('SQLite candidates:',[(x.filename,x.file_size) for x in files],flush=True)
+          if len(files)!=1: raise RuntimeError('Expected exactly one SQLite database')
+          with z.open(files[0]) as src,open('/tmp/ml.sqlite3','wb') as dst:
+              import shutil
+              shutil.copyfileobj(src,dst)
+          PY
+      - name: ステージ別基礎成績の比較
+        run: |
+          python - <<'PY'
+          import sqlite3,json,collections
+          from pathlib import Path
+          c=sqlite3.connect('file:/tmp/ml.sqlite3?mode=ro',uri=True);c.row_factory=sqlite3.Row
+          assert c.execute('SELECT count(*) FROM game').fetchone()[0]==2068
+          assert c.execute('SELECT count(*) FROM kyoku').fetchone()[0]==25238
+          sql="""
+          WITH calls AS MATERIALIZED (
+           SELECT e.kyoku_id,x.actor_player_id AS player_id FROM chi_event x JOIN event e ON e.id=x.event_id
+           UNION SELECT e.kyoku_id,x.actor_player_id FROM pon_event x JOIN event e ON e.id=x.event_id
+           UNION SELECT e.kyoku_id,x.actor_player_id FROM daiminkan_event x JOIN event e ON e.id=x.event_id
+          ), reaches AS MATERIALIZED (
+           SELECT e.kyoku_id,r.actor_player_id AS player_id,
+           ROW_NUMBER() OVER(PARTITION BY e.kyoku_id ORDER BY e.event_order,e.id) AS first_rank
+           FROM reach_event r JOIN event e ON e.id=r.event_id WHERE r.is_accepted=1
+          ), wins AS MATERIALIZED (
+           SELECT e.kyoku_id,a.actor_player_id AS player_id, SUM(a.agari_points) AS agari_points,MAX(e.type='tsumo') AS tsumo
+           FROM agari_event a JOIN event e ON e.id=a.event_id WHERE e.type IN ('ron','tsumo') GROUP BY 1,2
+          ), losses AS MATERIALIZED (
+           SELECT e.kyoku_id,a.target_player_id AS player_id FROM agari_event a JOIN event e ON e.id=a.event_id WHERE e.type='ron' GROUP BY 1,2
+          ), score_seq AS MATERIALIZED (
+           SELECT k.id AS kyoku_id,kpr.player_id,ls.start_year AS season,ss.stage,
+           kpr.score-COALESCE(LAG(kpr.score) OVER(PARTITION BY k.game_id,kpr.player_id ORDER BY k.id),25000) AS net
+           FROM kyoku k JOIN kyoku_player_result kpr ON kpr.kyoku_id=k.id
+           JOIN game g ON g.id=k.game_id JOIN season_stage ss ON ss.id=g.season_stage_id JOIN league_season ls ON ls.id=ss.league_season_id
+          )
+          SELECT s.*,p.name,
+           (a.player_id IS NOT NULL) AS furo,(r.player_id IS NOT NULL) AS riichi,
+           (r.first_rank=1) AS first_riichi,(w.player_id IS NOT NULL) AS win,(l.player_id IS NOT NULL) AS loss,
+           COALESCE(w.agari_points,0) AS agari_points,COALESCE(w.tsumo,0) AS tsumo
+           FROM score_seq s JOIN player p ON p.id=s.player_id
+           LEFT JOIN calls a ON a.kyoku_id=s.kyoku_id AND a.player_id=s.player_id
+           LEFT JOIN reaches r ON r.kyoku_id=s.kyoku_id AND r.player_id=s.player_id
+           LEFT JOIN wins w ON w.kyoku_id=s.kyoku_id AND w.player_id=s.player_id
+           LEFT JOIN losses l ON l.kyoku_id=s.kyoku_id AND l.player_id=s.player_id
+          """
+          rows=[dict(r) for r in c.execute(sql)]
+          assert len(rows)==100952
+          assert sum(r['riichi'] for r in rows)==22205
+          assert sum(r['furo'] for r in rows)==23207
+          assert not any(r['furo'] and r['riichi'] for r in rows)
+          games=[dict(r) for r in c.execute("""SELECT p.name,ls.start_year season,ss.stage,gr.rank,gr.league_points+gr.penalty_league_points pts FROM game_player_result gr JOIN player p ON p.id=gr.player_id JOIN game g ON g.id=gr.game_id JOIN season_stage ss ON ss.id=g.season_stage_id JOIN league_season ls ON ls.id=ss.league_season_id""")]
+          target='鈴木優'
+          def div(a,b):return round(a/b,4) if b else None
+          def summ(rs):
+           n=len(rs);w=sum(r['win'] for r in rs);ri=[r for r in rs if r['riichi']];fr=[r for r in ri if r['first_riichi']];fu=[r for r in rs if r['furo']]
+           d=dict(n=n,wins=w,win_pct=div(100*w,n),loss_pct=div(100*sum(r['loss'] for r in rs),n),avg_agari_points=div(sum(r['agari_points'] for r in rs),w),furo_n=len(fu),furo_pct=div(100*len(fu),n),furo_win_pct=div(100*sum(r['win'] for r in fu),len(fu)),riichi_n=len(ri),riichi_pct=div(100*len(ri),n),riichi_success_pct=div(100*sum(r['win'] for r in ri),len(ri)),riichi_loss_pct=div(100*sum(r['loss'] for r in ri),len(ri)),first_riichi_n=len(fr),first_riichi_success_pct=div(100*sum(r['win'] for r in fr),len(fr)),first_riichi_avg_net=div(sum(r['net'] for r in fr),len(fr)),avg_net=div(sum(r['net'] for r in rs),n))
+           return d
+          def gs(rs):
+           n=len(rs);return dict(games=n,pts=round(sum(r['pts'] for r in rs),1),avg_pts=div(sum(r['pts'] for r in rs),n),avg_rank=div(sum(r['rank'] for r in rs),n),top=sum(r['rank']==1 for r in rs),last=sum(r['rank']==4 for r in rs))
+          def phase(r):return 'regular' if r['stage']=='regular' else 'postseason'
+          assert {r['stage'] for r in rows}=={'regular','semifinal','final'}
+          seasons=sorted({r['season'] for r in rows if r['name']==target and phase(r)=='postseason'})
+          out={}
+          for scope in ['career','completed_postseason_seasons']+[str(y) for y in sorted({r['season'] for r in rows if r['name']==target})]:
+           allowed=lambda r:scope=='career' or (scope=='completed_postseason_seasons' and r['season'] in seasons) or str(r['season'])==scope
+           d={}
+           for group in ['regular','postseason']:
+            rs=[r for r in rows if allowed(r) and phase(r)==group];gg=[r for r in games if allowed(r) and phase(r)==group];ss=[r for r in rs if r['name']==target];sg=[r for r in gg if r['name']==target]
+            d[group]={'yu':summ(ss),'league':summ(rs),'yu_games':gs(sg),'league_games':gs(gg)}
+           out[scope]=d
+           print('STAGE',scope,json.dumps(d,ensure_ascii=False),flush=True)
+          assert out['career']['postseason']['yu_games']['pts']==588.0
+          assert out['career']['postseason']['yu_games']['games']==29
+          p=Path('results');p.mkdir(exist_ok=True)
+          (p/'suzuki_yu_stage.json').write_text(json.dumps(out,ensure_ascii=False,indent=2),encoding='utf8')
+          PY
+      - name: 研究結果を保存
+        uses: actions/upload-artifact@v4
+        with:
+          name: suzuki-yu-stage
+          path: results/
+          retention-days: 30
