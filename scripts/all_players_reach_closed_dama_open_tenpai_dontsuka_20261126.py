@@ -151,7 +151,7 @@ for label in labels:
  print('RESULT_OVERALL_RANKING',label,json.dumps(overall['ranked'][label],ensure_ascii=False,separators=(',',':')),flush=True)
 print('RESULT_2024_RANKING',json.dumps(next(r for r in report if r['scope']=='season_2024')['ranked']['closed_dama'],ensure_ascii=False,separators=(',',':')),flush=True)
 print('RESULT_2022_RANKING',json.dumps(next(r for r in report if r['scope']=='season_2022')['ranked']['closed_dama'],ensure_ascii=False,separators=(',',':')),flush=True)
-print('RESULT_2025_RANKING',json.dumps(next(r for r in report if r['scope']=='season_2025')['ranked']['damaten'],ensure_ascii=False,separators=(',',':')),flush=True)
+print('RESULT_2025_RANKING',json.dumps(next(r for r in report if r['scope']=='season_2025')['ranked']['closed_dama'],ensure_ascii=False,separators=(',',':')),flush=True)
 out=Path('results');out.mkdir(exist_ok=True)
 (out/'all_players_reach_closed_dama_open_tenpai_dontsuka_20261126.json').write_text(json.dumps({'data_scope':meta,'report':[{k:v for k,v in rr.items() if k!='ranked'} for rr in report]},ensure_ascii=False,indent=2)+'\n',encoding='utf-8')
 with (out/'all_players_reach_closed_dama_open_tenpai_dontsuka_20261126.csv').open('w',newline='',encoding='utf-8-sig') as f:
