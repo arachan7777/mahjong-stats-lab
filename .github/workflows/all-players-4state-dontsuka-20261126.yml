@@ -1,0 +1,35 @@
+name: ドンツカ四区分再検証（立直・門前ヤミテン・副露テンパイ・非テンパイ）
+on:
+  push:
+    paths:
+      - '.github/workflows/all-players-4state-dontsuka-20261126.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fetch pinned source database read-only
+        run: |
+          set -euo pipefail
+          curl -fL --retry 3 'https://github.com/konoui/m-league-game-db/releases/download/20261120-2341-04338cbb/database.zip' -o /tmp/database.zip
+          python - <<'PY'
+          import zipfile,shutil
+          with zipfile.ZipFile('/tmp/database.zip') as z:
+              files=[i for i in z.infolist() if not i.is_dir() and i.filename.endswith(('.sqlite3','.sqlite','.db'))]
+              assert len(files)==1,files
+              with z.open(files[0]) as src,open('/tmp/ml.sqlite3','wb') as dst:shutil.copyfileobj(src,dst)
+          PY
+      - name: Compare four hand states of all 56 players
+        run: python -u scripts/all_players_reach_closed_dama_open_tenpai_dontsuka_20261126.py /tmp/ml.sqlite3
+      - name: Upload read-only comparison outputs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: all-players-4state-dontsuka-20261126
+          path: results/
+          if-no-files-found: warn
+          retention-days: 7
