@@ -1,0 +1,27 @@
+name: 2018-10-26松本役満放銃時のテンパイ・立直状態（固定DB）
+on:
+  push:
+    paths:
+      - '.github/workflows/check-matsumoto-kokushi-state-20181026.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Load pinned source DB read-only
+        run: |
+          set -euo pipefail
+          curl -fL --retry 3 'https://github.com/konoui/m-league-game-db/releases/download/20261120-2341-04338cbb/database.zip' -o /tmp/database.zip
+          python - <<'PY'
+          import zipfile,shutil
+          with zipfile.ZipFile('/tmp/database.zip') as z:
+              files=[i for i in z.infolist() if not i.is_dir() and i.filename.endswith(('.sqlite3','.sqlite','.db'))]
+              assert len(files)==1,files
+              with z.open(files[0]) as src,open('/tmp/ml.sqlite3','wb') as dst:shutil.copyfileobj(src,dst)
+          PY
+      - name: Query event and prior hand state
+        run: python -u scripts/check_matsumoto_kokushi_dealin_tenpai_20181026.py /tmp/ml.sqlite3
