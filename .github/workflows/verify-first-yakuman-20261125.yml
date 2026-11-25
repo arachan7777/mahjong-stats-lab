@@ -1,0 +1,60 @@
+name: 役満放銃・史上初の原典DB時系列検証
+on:
+  push:
+    paths:
+      - '.github/workflows/verify-first-yakuman-20261125.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fetch pinned source DB and query read-only
+        run: |
+          set -euo pipefail
+          curl -fL --retry 3 'https://github.com/konoui/m-league-game-db/releases/download/20261120-2341-04338cbb/database.zip' -o /tmp/database.zip
+          python - <<'PY'
+          import zipfile, shutil, sqlite3, json, os
+          with zipfile.ZipFile('/tmp/database.zip') as z:
+              names=[x for x in z.namelist() if x.endswith(('.sqlite3','.sqlite','.db'))]
+              assert len(names)==1,names
+              with z.open(names[0]) as src, open('/tmp/ml.sqlite3','wb') as dst:
+                  shutil.copyfileobj(src,dst)
+          con=sqlite3.connect('file:/tmp/ml.sqlite3?mode=ro',uri=True)
+          con.row_factory=sqlite3.Row
+          con.execute('PRAGMA query_only=ON')
+          meta=dict(con.execute('SELECT COUNT(*) AS game_count, MIN(date) AS min_date, MAX(date) AS max_date FROM game').fetchone())
+          meta['kyoku_count']=con.execute('SELECT COUNT(*) FROM kyoku').fetchone()[0]
+          assert meta['game_count']==2068 and meta['kyoku_count']==25238,meta
+          print('DB_META '+json.dumps(meta,ensure_ascii=False),flush=True)
+          common="""
+          SELECT g.date AS game_date,ls.start_year AS season_start,ss.stage,g.stage_game_number,g.day_game_number,
+                 g.id AS game_id,k.round,k.honba_count,k.id AS kyoku_id,e.event_order,e.type AS event_type,
+                 ae.event_id, winner.name AS winner,loser.name AS dealin_player,
+                 ae.agari_tile,ae.agari_points,ae.description AS description,
+                 (SELECT GROUP_CONCAT(yn.name,',') FROM agari_yaku ay JOIN yaku_name yn ON yn.id=ay.yaku_name_id WHERE ay.agari_event_id=ae.event_id) AS yakus
+          FROM agari_event ae
+          JOIN event e ON e.id=ae.event_id
+          JOIN kyoku k ON k.id=e.kyoku_id
+          JOIN game g ON g.id=k.game_id
+          JOIN season_stage ss ON ss.id=g.season_stage_id
+          JOIN league_season ls ON ls.id=ss.league_season_id
+          JOIN player winner ON winner.id=ae.actor_player_id
+          LEFT JOIN player loser ON loser.id=ae.target_player_id
+          WHERE ae.is_yakuman=1
+          """
+          order=" ORDER BY g.date,g.day_game_number,g.stage_game_number,e.event_order,ae.event_id"
+          def run(label,where,limit):
+              q=common+where+order+" LIMIT "+str(limit)
+              rows=[dict(x) for x in con.execute(q)]
+              print(label+' '+json.dumps(rows,ensure_ascii=False),flush=True)
+          run('EARLIEST_YAKUMAN_ALL','',20)
+          run('EARLIEST_YAKUMAN_RON'," AND e.type='ron' AND ae.target_player_id IS NOT NULL",20)
+          run('MATSUMOTO_YAKUMAN_DEALIN'," AND e.type='ron' AND ae.target_player_id=(SELECT id FROM player WHERE name='松本吉弘')",30)
+          n=con.execute("SELECT COUNT(*) FROM agari_event ae JOIN event e ON e.id=ae.event_id WHERE e.type='ron' AND ae.is_yakuman=1 AND ae.target_player_id IS NOT NULL").fetchone()[0]
+          print('TOTAL_YAKUMAN_RON_DEALINS '+str(n),flush=True)
+          print('VALIDATION_SUCCESS',flush=True)
+          PY
