@@ -17,7 +17,7 @@ if param_template not in sql:
 
 # Derive a per-exhaustive-draw distribution from the same v0.3 per_tenpai CTE.
 # This keeps the canonical rate query intact and buckets final wait tiles physically
-# remaining in the dead wall as 0, 1, 2, 3, 4, and 5+.
+# remaining in the dead wall as exact counts, including zero.
 cte_end = sql.index("status_rows AS (")
 final_select = sql.index("SELECT p.id AS player_id", cte_end)
 distribution_suffix = """status_rows AS (
@@ -72,8 +72,7 @@ distribution_sql = sql[:cte_end] + """status_tenpai AS (
 ),
 distribution AS (
   SELECT tenpai_status,
-         CASE WHEN dead_wall_wait_tiles>=5 THEN '5+'
-              ELSE CAST(dead_wall_wait_tiles AS TEXT) END
+         CAST(dead_wall_wait_tiles AS TEXT)
            AS dead_wall_wait_tile_count,
          COUNT(*) AS final_tenpai_count,
          SUM(dead_wall_wait_tiles) AS dead_wall_wait_tiles
@@ -85,8 +84,7 @@ SELECT tenpai_status,dead_wall_wait_tile_count,
 FROM distribution
 ORDER BY CASE tenpai_status WHEN 'all' THEN 0 WHEN 'reach' THEN 1
                              WHEN 'menzen_dama' THEN 2 ELSE 3 END,
-         CASE dead_wall_wait_tile_count WHEN '0' THEN 0 WHEN '1' THEN 1
-              WHEN '2' THEN 2 WHEN '3' THEN 3 WHEN '4' THEN 4 ELSE 5 END;
+         CAST(dead_wall_wait_tile_count AS INTEGER);
 """
 if final_select <= cte_end:
     raise RuntimeError("Could not locate canonical query's final SELECT")
