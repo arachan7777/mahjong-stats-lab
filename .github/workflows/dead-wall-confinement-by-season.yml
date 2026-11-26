@@ -1,0 +1,50 @@
+name: 王牌幽閉率 v0.2 シーズン別集計
+on:
+  push:
+    paths:
+      - '.github/workflows/dead-wall-confinement-by-season.yml'
+      - 'scripts/rank_dead_wall_confinement_by_season.py'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  ranking:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: 固定版SQLite DBを取得
+        run: |
+          set -euo pipefail
+          URL=https://github.com/konoui/m-league-game-db/releases/download/20261120-2341-04338cbb/database.zip
+          curl -fL --retry 3 "$URL" -o /tmp/database.zip
+          python - <<'PY'
+          import zipfile,shutil
+          z=zipfile.ZipFile('/tmp/database.zip')
+          files=[x for x in z.infolist() if not x.is_dir() and x.filename.endswith(('.sqlite3','.sqlite','.db'))]
+          if len(files)!=1: raise RuntimeError(f'Expected one SQLite DB, found {[x.filename for x in files]}')
+          with z.open(files[0]) as src,open('/tmp/ml.sqlite3','wb') as dst: shutil.copyfileobj(src,dst)
+          PY
+      - name: v0.2全期間照合とシーズン別集計
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import sqlite3
+          c=sqlite3.connect('file:/tmp/ml.sqlite3?mode=ro',uri=True)
+          result=c.execute('PRAGMA quick_check').fetchone()[0]
+          print('quick_check:',result)
+          assert result=='ok'
+          PY
+          python -u scripts/rank_dead_wall_confinement_v02.py /tmp/ml.sqlite3
+          python -u scripts/rank_dead_wall_confinement_by_season.py /tmp/ml.sqlite3
+      - name: 集計成果物
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dead-wall-confinement-v02-season-results
+          path: results/
+          if-no-files-found: warn
+          retention-days: 7
