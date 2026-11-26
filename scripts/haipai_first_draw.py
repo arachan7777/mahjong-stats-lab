@@ -195,3 +195,34 @@ for group,total in [('全体',5659),('伊達朱里紗',147)]:
     for flag in (0,1):
         print('REACHOUT',group,flag,dict(ends[group,flag]))
 assert ends['伊達朱里紗',1]['tsumo']==8
+
+# Count each of the three responders once, from the first accepted riichi.
+response_query = """
+WITH reaches AS (
+ SELECT e.kyoku_id,r.actor_player_id pid,
+ row_number() OVER (PARTITION BY e.kyoku_id ORDER BY e.event_order,e.id) seq
+ FROM event e JOIN reach_event r ON r.event_id=e.id WHERE r.is_accepted=1
+)
+SELECT p.name,own.seq IS NOT NULL,
+ CASE WHEN a.actor_player_id=p.id THEN w.type
+ WHEN a.target_player_id=p.id THEN 'deal_in' ELSE 'other' END
+FROM reaches first
+JOIN event e ON e.kyoku_id=first.kyoku_id AND e.type='haipai'
+JOIN haipai_event h ON h.event_id=e.id
+JOIN player p ON p.id=h.actor_player_id AND p.id<>first.pid
+LEFT JOIN reaches own ON own.kyoku_id=e.kyoku_id AND own.pid=p.id
+JOIN event w ON w.kyoku_id=e.kyoku_id AND w.type IN ('ron','tsumo','ryukyoku')
+LEFT JOIN agari_event a ON a.event_id=w.id
+WHERE first.seq=1
+"""
+responses=defaultdict(Counter)
+for name,chase,result in db.execute(response_query):
+    for group in (name,'全体'):
+        responses[group,chase][result]+=1
+for group in ('全体','伊達朱里紗'):
+    chased=responses[group,1]
+    assert sum(chased.values())==sum(duels[group,0].values())
+    for result in ('ron','tsumo'):
+        assert chased[result]==duels[group,0][result]
+    for chase in (0,1):
+        print('RESPONSE',group,chase,dict(responses[group,chase]))
