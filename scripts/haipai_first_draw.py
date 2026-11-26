@@ -226,3 +226,46 @@ for group in ('全体','伊達朱里紗'):
         assert chased[result]==duels[group,0][result]
     for chase in (0,1):
         print('RESPONSE',group,chase,dict(responses[group,chase]))
+
+# Fixed-version actual kyotaku net by accepted reach expenditure, agari receipts,
+# and any pool remaining at game end, assigned to the game's first-place finisher.
+kyotaku_query = """
+WITH reach_spent AS (
+ SELECT e.kyoku_id,r.actor_player_id player_id,COUNT(*) sticks
+ FROM reach_event r JOIN event e ON e.id=r.event_id
+ WHERE r.is_accepted=1 GROUP BY e.kyoku_id,r.actor_player_id
+), win_received AS (
+ SELECT e.kyoku_id,a.actor_player_id player_id,SUM(a.kyotaku_points) points
+ FROM agari_event a JOIN event e ON e.id=a.event_id GROUP BY e.kyoku_id,a.actor_player_id
+), last_kyoku AS (
+ SELECT game_id,MAX(id) kyoku_id FROM kyoku GROUP BY game_id
+), final_reach AS (
+ SELECT l.game_id,COALESCE(SUM(rs.sticks),0) sticks
+ FROM last_kyoku l LEFT JOIN reach_spent rs ON rs.kyoku_id=l.kyoku_id GROUP BY l.game_id
+), final_win AS (
+ SELECT l.game_id,COALESCE(SUM(w.points),0) points
+ FROM last_kyoku l LEFT JOIN win_received w ON w.kyoku_id=l.kyoku_id GROUP BY l.game_id
+), final_pool AS (
+ SELECT l.game_id,k.kyotaku_count*1000+fr.sticks*1000-fw.points remaining
+ FROM last_kyoku l JOIN kyoku k ON k.id=l.kyoku_id
+ JOIN final_reach fr ON fr.game_id=l.game_id JOIN final_win fw ON fw.game_id=l.game_id
+), per_game AS (
+ SELECT gr.game_id,gr.player_id,
+ COALESCE((SELECT SUM(sticks)*1000 FROM reach_spent rs JOIN kyoku k ON k.id=rs.kyoku_id
+ WHERE k.game_id=gr.game_id AND rs.player_id=gr.player_id),0) spent,
+ COALESCE((SELECT SUM(points) FROM win_received w JOIN kyoku k ON k.id=w.kyoku_id
+ WHERE k.game_id=gr.game_id AND w.player_id=gr.player_id),0) won,
+ CASE WHEN gr.rank=1 THEN fp.remaining ELSE 0 END end_pool
+ FROM game_player_result gr JOIN final_pool fp ON fp.game_id=gr.game_id
+)
+SELECT p.name,COUNT(*),SUM(pg.spent),SUM(pg.won),SUM(pg.end_pool),
+ SUM(pg.won+pg.end_pool-pg.spent)
+FROM per_game pg JOIN player p ON p.id=pg.player_id
+GROUP BY p.id,p.name ORDER BY SUM(pg.won+pg.end_pool-pg.spent) DESC,p.name
+"""
+kyotaku=db.execute(kyotaku_query).fetchall()
+print('KYOTAKU_ZERO_SUM',sum(row[5] for row in kyotaku))
+for row in kyotaku:
+    if row[0] in ('伊達朱里紗',):
+        print('KYOTAKU_PLAYER',row)
+print('KYOTAKU_RANK',next(i for i,row in enumerate(kyotaku,1) if row[0]=='伊達朱里紗'),len(kyotaku))
