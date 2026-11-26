@@ -73,3 +73,30 @@ for name, shanten, n, wins in rows:
     for key in [(name,shanten),(name,'all'),('全体',shanten),('全体','all')]:
         buckets[key].update(n=n,w=wins)
 print('DATE_COMPARE', [(key,dict(v)) for key,v in buckets.items() if key[0] in ('全体','伊達朱里紗')])
+
+# 先制者は全員を対象に決めたうえで配牌2シャンテンに限定する。
+split_query = """
+WITH candidates AS MATERIALIZED (
+ SELECT e.kyoku_id,t.player_id,
+ ROW_NUMBER() OVER(PARTITION BY e.kyoku_id ORDER BY e.event_order,t.player_id) AS pos
+ FROM player_tenpai_state t JOIN event e ON e.id=t.event_id
+ WHERE t.is_actor=1 AND e.type IN ('haipai','discard')
+)
+SELECT p.name,CASE WHEN f.player_id=h.actor_player_id THEN 1 ELSE 0 END lead,
+ COUNT(*),SUM(EXISTS(SELECT 1 FROM event w JOIN agari_event a ON a.event_id=w.id
+ WHERE w.kyoku_id=e.kyoku_id AND a.actor_player_id=h.actor_player_id))
+FROM haipai_event h JOIN event e ON e.id=h.event_id
+JOIN player_state s ON s.event_id=h.event_id AND s.player_id=h.actor_player_id
+JOIN player p ON p.id=h.actor_player_id
+LEFT JOIN candidates f ON f.kyoku_id=e.kyoku_id AND f.pos=1
+WHERE s.shanten_count=2 GROUP BY p.name,lead
+"""
+split = defaultdict(Counter)
+for player, lead, n, wins in db.execute(split_query):
+    for group in (player,'全体'):
+        split[group,lead].update(n=n,w=wins)
+for group in ('伊達朱里紗','全体'):
+    for lead in (1,0):
+        print('SPLIT2',group,lead,dict(split[group,lead]))
+    assert sum(split[group,i]['w'] for i in (0,1)) == buckets[group,2]['w']
+    assert sum(split[group,i]['n'] for i in (0,1)) == buckets[group,2]['n']
