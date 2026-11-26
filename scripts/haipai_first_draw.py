@@ -164,3 +164,34 @@ WHERE s.shanten_count=2 AND p.name='伊達朱里紗' AND f.player_id IS NOT h.ac
 prior_counts=Counter(db.execute(prior))
 assert sum(prior_counts.values())==15
 print('PRIOR15',dict(prior_counts))
+
+# 先制を取れなかった配牌2シャンテンを終局結果と他家成立リーチで分類。
+outcome_query = split_query[:split_query.index("SELECT p.name")] + """
+SELECT p.name,e.kyoku_id,
+ EXISTS(SELECT 1 FROM reach_event z JOIN event re ON re.id=z.event_id
+ WHERE re.kyoku_id=e.kyoku_id AND z.actor_player_id<>h.actor_player_id
+ AND z.is_accepted=1 AND re.event_order<end_e.event_order),
+ CASE WHEN end_e.type='ryukyoku' THEN 'draw'
+ WHEN a.actor_player_id=h.actor_player_id THEN end_e.type
+ WHEN a.target_player_id=h.actor_player_id THEN 'deal_in'
+ WHEN end_e.type='tsumo' THEN 'other_tsumo' ELSE 'side_ron' END
+FROM haipai_event h JOIN event e ON e.id=h.event_id
+JOIN player_state s ON s.event_id=h.event_id AND s.player_id=h.actor_player_id
+JOIN player p ON p.id=h.actor_player_id
+LEFT JOIN candidates f ON f.kyoku_id=e.kyoku_id AND f.pos=1
+JOIN event end_e ON end_e.kyoku_id=e.kyoku_id AND end_e.type IN ('ryukyoku','ron','tsumo')
+LEFT JOIN agari_event a ON a.event_id=end_e.id
+WHERE s.shanten_count=2 AND f.player_id IS NOT h.actor_player_id
+"""
+ends = defaultdict(Counter)
+seen = set()
+for name, kid, exposed, result in db.execute(outcome_query):
+    assert (name,kid) not in seen
+    seen.add((name,kid))
+    for group in (name,'全体'):
+        ends[group,exposed][result]+=1
+for group,total in [('全体',5659),('伊達朱里紗',147)]:
+    assert sum(sum(ends[group,flag].values()) for flag in (0,1))==total
+    for flag in (0,1):
+        print('REACHOUT',group,flag,dict(ends[group,flag]))
+assert ends['伊達朱里紗',1]['tsumo']==8
