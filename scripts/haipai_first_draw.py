@@ -269,3 +269,41 @@ for row in kyotaku:
     if row[0] in ('伊達朱里紗',):
         print('KYOTAKU_PLAYER',row)
 print('KYOTAKU_RANK',next(i for i,row in enumerate(kyotaku,1) if row[0]=='伊達朱里紗'),len(kyotaku))
+
+# Agari points per winning hand, with bonus payments shown separately.
+avg_agari = db.execute("""
+SELECT p.name,COUNT(*),SUM(a.agari_points),AVG(a.agari_points),
+       SUM(a.honba_points),SUM(a.kyotaku_points),SUM(a.revenue_points),AVG(a.revenue_points)
+FROM agari_event a JOIN event e ON e.id=a.event_id
+JOIN player p ON p.id=a.actor_player_id WHERE e.type IN ('ron','tsumo')
+GROUP BY p.id,p.name HAVING p.name='伊達朱里紗'
+""").fetchone()
+league_agari = db.execute("""
+SELECT COUNT(*),SUM(a.agari_points),AVG(a.agari_points),
+       SUM(a.honba_points),SUM(a.kyotaku_points),SUM(a.revenue_points),AVG(a.revenue_points)
+FROM agari_event a JOIN event e ON e.id=a.event_id WHERE e.type IN ('ron','tsumo')
+""").fetchone()
+print('AVG_AGARI_DATE',avg_agari)
+print('AVG_AGARI_LEAGUE',league_agari)
+
+# Head-to-head final score comparisons in games shared with Date.
+h2h = """
+WITH last_kyoku AS (SELECT game_id,MAX(id) kyoku_id FROM kyoku GROUP BY game_id),
+scores AS (
+ SELECT l.game_id,kpr.player_id,kpr.score
+ FROM last_kyoku l JOIN kyoku_player_result kpr ON kpr.kyoku_id=l.kyoku_id
+), date_games AS (
+ SELECT s.game_id,s.score date_score FROM scores s JOIN player p ON p.id=s.player_id
+ WHERE p.name='伊達朱里紗'
+)
+SELECT p.name,COUNT(*),SUM(CASE WHEN d.date_score>s.score THEN 1 ELSE 0 END),
+       SUM(CASE WHEN d.date_score=s.score THEN 1 ELSE 0 END),
+       SUM(CASE WHEN d.date_score<s.score THEN 1 ELSE 0 END),
+       SUM(d.date_score-s.score),AVG(d.date_score-s.score)
+FROM date_games d JOIN scores s ON s.game_id=d.game_id
+JOIN player p ON p.id=s.player_id
+WHERE p.name<>'伊達朱里紗'
+GROUP BY p.id,p.name ORDER BY COUNT(*) DESC,p.name
+"""
+for row in db.execute(h2h):
+    print('HEAD_TO_HEAD',row)
