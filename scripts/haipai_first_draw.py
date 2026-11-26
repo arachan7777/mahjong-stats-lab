@@ -122,3 +122,45 @@ for group in ('伊達朱里紗','全体'):
     for lead in (1,0):
         assert sum(forms[group,lead].values())==split[group,lead]['w']
         print('WINFORM',group,lead,dict(forms[group,lead]))
+
+# 成立リーチが複数の局。本人より早い他家が一人でもいれば追いかけ。
+fight = """
+WITH rr AS (
+ SELECT e.kyoku_id,r.actor_player_id pid,e.event_order ord
+ FROM reach_event r JOIN event e ON e.id=r.event_id WHERE r.is_accepted=1
+), contested AS (
+ SELECT *,min(ord) OVER(PARTITION BY kyoku_id) earliest,
+ count(*) OVER(PARTITION BY kyoku_id) participants FROM rr
+)
+SELECT p.name,r.ord=r.earliest first,r.participants,
+ CASE WHEN a.actor_player_id=r.pid THEN w.type
+ WHEN a.actor_player_id IS NULL THEN 'draw'
+ WHEN EXISTS(SELECT 1 FROM rr o WHERE o.kyoku_id=r.kyoku_id AND o.pid=a.actor_player_id) THEN 'rival'
+ ELSE 'third' END outcome
+FROM contested r JOIN player p ON p.id=r.pid
+LEFT JOIN (event w JOIN agari_event a ON a.event_id=w.id) ON w.kyoku_id=r.kyoku_id
+WHERE r.participants>=2
+"""
+duels=defaultdict(Counter)
+for name, first, participants, outcome in db.execute(fight):
+    for g in (name,'全体'):
+        duels[g,first][outcome]+=1
+for g in ('伊達朱里紗','全体'):
+    for first in (0,1):
+        print('DUEL',g,first,dict(duels[g,first]))
+prior = split_query[:split_query.index("SELECT p.name")] + """
+SELECT EXISTS(SELECT 1 FROM reach_event z JOIN event re ON re.id=z.event_id
+ WHERE re.kyoku_id=e.kyoku_id AND z.actor_player_id=h.actor_player_id AND z.is_accepted=1 AND re.event_order<w.event_order),
+ EXISTS(SELECT 1 FROM reach_event z JOIN event re ON re.id=z.event_id
+ WHERE re.kyoku_id=e.kyoku_id AND z.actor_player_id<>h.actor_player_id AND z.is_accepted=1 AND re.event_order<w.event_order)
+FROM haipai_event h JOIN event e ON e.id=h.event_id
+JOIN player_state s ON s.event_id=h.event_id AND s.player_id=h.actor_player_id
+JOIN player p ON p.id=h.actor_player_id
+LEFT JOIN candidates f ON f.kyoku_id=e.kyoku_id AND f.pos=1
+JOIN event w ON w.kyoku_id=e.kyoku_id AND w.type='tsumo'
+JOIN agari_event a ON a.event_id=w.id AND a.actor_player_id=h.actor_player_id
+WHERE s.shanten_count=2 AND p.name='伊達朱里紗' AND f.player_id IS NOT h.actor_player_id
+"""
+prior_counts=Counter(db.execute(prior))
+assert sum(prior_counts.values())==15
+print('PRIOR15',dict(prior_counts))
