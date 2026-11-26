@@ -100,3 +100,25 @@ for group in ('伊達朱里紗','全体'):
         print('SPLIT2',group,lead,dict(split[group,lead]))
     assert sum(split[group,i]['w'] for i in (0,1)) == buckets[group,2]['w']
     assert sum(split[group,i]['n'] for i in (0,1)) == buckets[group,2]['n']
+
+# 配牌2シャンテンの和了形を、直前の先制集計と同じ対象で照合する。
+form_query = split_query[:split_query.index("SELECT p.name")] + """
+SELECT p.name,CASE WHEN f.player_id=h.actor_player_id THEN 1 ELSE 0 END lead,
+       w.type, a.target_player_id IS NULL, count(*)
+FROM haipai_event h JOIN event e ON e.id=h.event_id
+JOIN player_state s ON s.event_id=h.event_id AND s.player_id=h.actor_player_id
+JOIN player p ON p.id=h.actor_player_id
+LEFT JOIN candidates f ON f.kyoku_id=e.kyoku_id AND f.pos=1
+JOIN event w ON w.kyoku_id=e.kyoku_id
+JOIN agari_event a ON a.event_id=w.id AND a.actor_player_id=h.actor_player_id
+WHERE s.shanten_count=2 GROUP BY p.name,lead,w.type,a.target_player_id IS NULL
+"""
+forms = defaultdict(Counter)
+for player, lead, kind, no_target, n in db.execute(form_query):
+    assert (kind,no_target) in [('ron',0),('tsumo',1)], (kind,no_target)
+    for group in (player,'全体'):
+        forms[group,lead][kind] += n
+for group in ('伊達朱里紗','全体'):
+    for lead in (1,0):
+        assert sum(forms[group,lead].values())==split[group,lead]['w']
+        print('WINFORM',group,lead,dict(forms[group,lead]))
