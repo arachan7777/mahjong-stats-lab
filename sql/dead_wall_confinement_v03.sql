@@ -36,7 +36,25 @@ final_tenpai AS MATERIALIZED (
              AND ree.event_order<=ed.ryukyoku_order
              AND re.actor_player_id=rp.player_id
              AND re.is_accepted=1
-         ) THEN 'reach' ELSE 'no_reach' END AS reach_status
+         ) THEN 'reach'
+         WHEN EXISTS (
+           SELECT 1 FROM chi_event c JOIN event ce ON ce.id=c.event_id
+           WHERE ce.kyoku_id=ed.kyoku_id AND ce.event_order<=ed.ryukyoku_order
+             AND c.actor_player_id=rp.player_id
+         ) OR EXISTS (
+           SELECT 1 FROM pon_event c JOIN event ce ON ce.id=c.event_id
+           WHERE ce.kyoku_id=ed.kyoku_id AND ce.event_order<=ed.ryukyoku_order
+             AND c.actor_player_id=rp.player_id
+         ) OR EXISTS (
+           SELECT 1 FROM daiminkan_event c JOIN event ce ON ce.id=c.event_id
+           WHERE ce.kyoku_id=ed.kyoku_id AND ce.event_order<=ed.ryukyoku_order
+             AND c.actor_player_id=rp.player_id
+         ) OR EXISTS (
+           SELECT 1 FROM shominkan_event c JOIN event ce ON ce.id=c.event_id
+           WHERE ce.kyoku_id=ed.kyoku_id AND ce.event_order<=ed.ryukyoku_order
+             AND c.actor_player_id=rp.player_id
+         ) THEN 'open_tenpai'
+         ELSE 'menzen_dama' END AS tenpai_status
   FROM exhaustive_draws ed
   JOIN ryukyoku_player rp
     ON rp.ryukyoku_event_id=ed.ryukyoku_event_id
@@ -56,7 +74,7 @@ last_tenpai_state AS MATERIALIZED (
    AND e.event_order<=ft.ryukyoku_order
 ),
 final_wait_tiles AS MATERIALIZED (
-  SELECT ft.kyoku_id,ft.player_id,ft.ryukyoku_event_id,ft.reach_status,
+  SELECT ft.kyoku_id,ft.player_id,ft.ryukyoku_event_id,ft.tenpai_status,
          CASE WHEN substr(TRIM(j.value),1,1)='0'
               THEN '5'||substr(TRIM(j.value),2)
               ELSE TRIM(j.value) END AS tile
@@ -101,7 +119,7 @@ visible_dora AS MATERIALIZED (
   GROUP BY e.kyoku_id,tile
 ),
 per_tenpai AS MATERIALIZED (
-  SELECT ft.kyoku_id,ft.player_id,ft.reach_status,
+  SELECT ft.kyoku_id,ft.player_id,ft.tenpai_status,
          COALESCE(SUM(4-COALESCE(h.dealt_count,0)-COALESCE(d.draw_count,0)),0)
            AS dead_wall_wait_tiles,
          COALESCE(SUM(COALESCE(v.indicator_count,0)),0)
@@ -115,20 +133,20 @@ per_tenpai AS MATERIALIZED (
     ON d.kyoku_id=w.kyoku_id AND d.tile=w.tile
   LEFT JOIN visible_dora v
     ON v.kyoku_id=w.kyoku_id AND v.tile=w.tile
-  GROUP BY ft.kyoku_id,ft.player_id,ft.reach_status
+  GROUP BY ft.kyoku_id,ft.player_id,ft.tenpai_status
 ),
 status_rows AS (
-  SELECT player_id,reach_status,
+  SELECT player_id,tenpai_status,
          COUNT(*) AS final_tenpai_count,
          SUM(CASE WHEN dead_wall_wait_tiles>0 THEN 1 ELSE 0 END)
            AS dead_wall_confinement_count,
          SUM(dead_wall_wait_tiles) AS dead_wall_wait_tiles,
          SUM(dead_wall_wait_indicators) AS dead_wall_wait_indicators
   FROM per_tenpai
-  GROUP BY player_id,reach_status
+  GROUP BY player_id,tenpai_status
 ),
 all_rows AS (
-  SELECT player_id,'all' AS reach_status,
+  SELECT player_id,'all' AS tenpai_status,
          COUNT(*) AS final_tenpai_count,
          SUM(CASE WHEN dead_wall_wait_tiles>0 THEN 1 ELSE 0 END)
            AS dead_wall_confinement_count,
@@ -142,7 +160,7 @@ results AS (
   UNION ALL
   SELECT * FROM status_rows
 )
-SELECT p.id AS player_id,p.name AS player_name,r.reach_status,
+SELECT p.id AS player_id,p.name AS player_name,r.tenpai_status,
        r.final_tenpai_count,r.dead_wall_confinement_count,
        ROUND(100.0*r.dead_wall_confinement_count/
              NULLIF(r.final_tenpai_count,0),4) AS dead_wall_confinement_rate_pct,
@@ -158,4 +176,4 @@ SELECT p.id AS player_id,p.name AS player_name,r.reach_status,
 FROM results r
 JOIN player p ON p.id=r.player_id
 ORDER BY p.name,
-         CASE r.reach_status WHEN 'all' THEN 0 WHEN 'reach' THEN 1 ELSE 2 END;
+         CASE r.tenpai_status WHEN 'all' THEN 0 WHEN 'reach' THEN 1 ELSE 2 END;
