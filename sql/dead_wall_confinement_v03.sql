@@ -5,7 +5,7 @@
 -- 王牌幽閉枚数：最終待ち牌のうち、流局時の物理的な王牌14枚に残っていた実牌枚数の合計。
 -- 途中のテンパイ、待ち替え、宣言時点の残枚数は集計しない。
 -- 赤5と通常5は同じ牌種。ドラ表示牌も王牌の実牌として主指標に含む。
--- 「reach_status」は成立リーチあり/なしの参考内訳。「no_reach」は門前ヤミテンと副露テンパイを含む。
+-- 「tenpai_status」は成立リーチあり/なしの参考内訳。「no_reach」は門前ヤミテンと副露テンパイを含む。
 -- params.start_year=NULL、stage=NULL は全期間・全ステージ。
 WITH
 params AS (SELECT NULL AS start_year, NULL AS stage),
