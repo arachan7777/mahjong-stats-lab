@@ -86,6 +86,24 @@ ORDER BY CASE tenpai_status WHEN 'all' THEN 0 WHEN 'reach' THEN 1
                              WHEN 'menzen_dama' THEN 2 ELSE 3 END,
          CAST(dead_wall_wait_tile_count AS INTEGER);
 """
+max_hits_sql = sql[:cte_end] + """max_value AS (
+  SELECT MAX(dead_wall_wait_tiles) AS max_tiles
+  FROM per_tenpai
+)
+SELECT pt.kyoku_id,pt.player_id,p.name AS player_name,
+       ls.start_year AS season_start_year,ss.stage,
+       g.date AS game_date,g.day_game_number,g.stage_game_number,
+       g.m_league_game_id,k.round AS kyoku_round,k.honba_count,
+       pt.tenpai_status,pt.dead_wall_wait_tiles AS dead_wall_wait_tile_count
+FROM per_tenpai pt
+JOIN kyoku k ON k.id=pt.kyoku_id
+JOIN game g ON g.id=k.game_id
+JOIN season_stage ss ON ss.id=g.season_stage_id
+JOIN league_season ls ON ls.id=ss.league_season_id
+JOIN player p ON p.id=pt.player_id
+WHERE pt.dead_wall_wait_tiles=(SELECT max_tiles FROM max_value)
+ORDER BY g.date,g.day_game_number,g.stage_game_number,k.round,k.honba_count,p.name;
+"""
 if final_select <= cte_end:
     raise RuntimeError("Could not locate canonical query's final SELECT")
 distribution_sql = distribution_sql.replace(
@@ -161,6 +179,18 @@ for year, label in periods:
 
     print(f"{label}: {summary_rows[-1]}", flush=True)
 
+max_query = max_hits_sql.replace(
+    param_template,
+    "params AS (SELECT NULL AS start_year, NULL AS stage)",
+    1,
+)
+max_event_rows = [dict(row) for row in con.execute(max_query)]
+if max_event_rows:
+    with (OUT_DIR / "dead_wall_confinement_v03_max_events.csv").open("w", newline="", encoding="utf-8-sig") as f:
+        writer = csv.DictWriter(f, fieldnames=list(max_event_rows[0]))
+        writer.writeheader()
+        writer.writerows(max_event_rows)
+
 if detail_rows:
     with (OUT_DIR / "dead_wall_confinement_v03_by_player.csv").open("w", newline="", encoding="utf-8-sig") as f:
         writer = csv.DictWriter(f, fieldnames=list(detail_rows[0]))
@@ -178,3 +208,4 @@ if distribution_rows:
 print("Wrote results/dead_wall_confinement_v03_by_player.csv", flush=True)
 print("Wrote results/dead_wall_confinement_v03_summary.csv", flush=True)
 print("Wrote results/dead_wall_confinement_v03_tile_distribution.csv", flush=True)
+print("Wrote results/dead_wall_confinement_v03_max_events.csv", flush=True)
