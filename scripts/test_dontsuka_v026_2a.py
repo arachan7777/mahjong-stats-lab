@@ -21,6 +21,9 @@ class Stage2ATests(unittest.TestCase):
     def test_blocks(self):
         self.assertEqual(block("5-050m"),["5m","0m","5m","0m"])
         self.assertEqual(block("-123s"),["1s","2s","3s"])
+        self.assertEqual(block("6z6z-6z"),["6z","6z","6z"])
+        self.assertEqual(block("7s5s6s"),["7s","5s","6s"])
+        self.assertEqual(block("5m0m-5m5m"),["5m","0m","5m","5m"])
     def test_ankan_rinshan(self):
         r=seed("1m,1m,1m,2m,3m,4m,2p,3p,4p,2s,3s,4s,5z")
         draw(r,"1m");step(r,"ankan",t="1m",block="1111m");draw(r,"5z",True)
@@ -79,6 +82,13 @@ class Stage2ATests(unittest.TestCase):
         draw(r,"5z");r.omote=["4p"];r.ura=["7z"]
         y=score_hand(r,"5z")["yaku"]
         self.assertEqual(y["ドラ"],1);self.assertEqual(y["赤ドラ"],1);self.assertEqual(y["裏ドラ"],2)
+    def test_double_wind_pair_two_fu(self):
+        r=seed("1m,1m,0m,7m,5p,8p,2z,2z,6p,7p,4p,1m,6m")
+        r.reaches.add(1);r.last_action=("discard",2,"9p")
+        h,m,f=r.winning(1,"9p",False,2)
+        v=evaluate(h,m,"9p",f,"2z","2z",[],[])
+        self.assertEqual(v["fu"],40)
+        self.assertEqual(v["points"],2600)
     def test_no_silent_tile_substitution(self):
         r=seed("5m")
         with self.assertRaises(ValueError):discard(r,"0m")
