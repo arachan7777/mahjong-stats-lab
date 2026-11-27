@@ -1,0 +1,44 @@
+name: ドラのツモ取得数・赤ドラ通常ドラ分離（固定DB）
+on:
+  push:
+    paths:
+      - '.github/workflows/dora-tsumo-only-v01.yml'
+      - 'sql/dora_tsumo_only_v01.sql'
+      - 'scripts/rank_dora_tsumo_only_v01.py'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  ranking:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: 固定版SQLite ZIPを取得
+        run: |
+          set -euo pipefail
+          URL=https://github.com/konoui/m-league-game-db/releases/download/20261120-2341-04338cbb/database.zip
+          curl -fL --retry 3 "$URL" -o /tmp/database.zip
+          echo "e2e702402301ae136da71e3f79113f929e291779ff4997c24db5262aaa4ff548  /tmp/database.zip" | sha256sum --check -
+          python - <<'PY'
+          import shutil,zipfile
+          z=zipfile.ZipFile('/tmp/database.zip')
+          files=[x for x in z.infolist() if not x.is_dir() and x.filename.endswith(('.sqlite3','.sqlite','.db'))]
+          print('SQLite candidates:',[(x.filename,x.file_size) for x in files],flush=True)
+          if len(files)!=1: raise RuntimeError('Expected exactly one SQLite database')
+          with z.open(files[0]) as src,open('/tmp/ml.sqlite3','wb') as dst:
+              shutil.copyfileobj(src,dst)
+          PY
+      - name: 全選手のツモ取得分を集計・検算
+        run: python -u scripts/rank_dora_tsumo_only_v01.py /tmp/ml.sqlite3
+      - name: 集計成果物
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dora-tsumo-only-v01-fixed-20261120
+          path: results/
+          if-no-files-found: warn
+          retention-days: 7
