@@ -18,6 +18,10 @@ def block(s):
     m = re.fullmatch(r"([0-9-]+)([mpsz])",s.strip())
     if m:
         return [tile(n+m[2]) for n in m[1] if n!="-"]
+    # Fixed DB event blocks also use repeated full tile notation: 6z6z-6z.
+    compact=s.strip().replace("-","")
+    if re.fullmatch(r"(?:[0-9][mpsz])+",compact):
+        return [tile(x) for x in re.findall(r"[0-9][mpsz]",compact)]
     return hand(s)
 
 def normal(t):
