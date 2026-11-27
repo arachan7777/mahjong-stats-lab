@@ -1,0 +1,86 @@
+name: 配牌＋ツモ ドラ取得 v0.1
+on:
+  push:
+    paths:
+      - '.github/workflows/dora-dealt-plus-tsumo-v01.yml'
+      - 'sql/dora_dealt_plus_tsumo_v01.sql'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  ranking:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - name: 基準版SQLiteを取得して検証
+        run: |
+          set -euo pipefail
+          curl -fL --retry 3 'https://github.com/konoui/m-league-game-db/releases/download/20261120-2341-04338cbb/database.zip' -o /tmp/database.zip
+          echo 'e2e702402301ae136da71e3f79113f929e291779ff4997c24db5262aaa4ff548  /tmp/database.zip' | sha256sum -c -
+          python - <<'PY'
+          import zipfile,shutil
+          z=zipfile.ZipFile('/tmp/database.zip')
+          files=[x for x in z.infolist() if not x.is_dir() and x.filename.endswith(('.sqlite3','.sqlite','.db'))]
+          if len(files)!=1: raise RuntimeError(f'expected one db: {[x.filename for x in files]}')
+          with z.open(files[0]) as src,open('/tmp/ml.sqlite3','wb') as dst: shutil.copyfileobj(src,dst)
+          PY
+      - name: 配牌＋ツモ集計と検算
+        run: |
+          python - <<'PY'
+          import sqlite3,csv,json,os
+          from pathlib import Path
+          db=sqlite3.connect('file:/tmp/ml.sqlite3?mode=ro',uri=True)
+          db.row_factory=sqlite3.Row
+          assert db.execute('PRAGMA quick_check').fetchone()[0]=='ok'
+          sql=Path('sql/dora_dealt_plus_tsumo_v01.sql').read_text()
+          rows=[dict(r) for r in db.execute(sql)]
+          assert len([r for r in rows if r['period']=='ALL'])==56
+          assert len(rows)==56+56*9,(len(rows))
+          allrows=[r for r in rows if r['period']=='ALL']
+          totals={k:sum(r[k] for r in allrows) for k in ('draw_red','draw_normal','deal_red','deal_normal')}
+          assert totals['draw_red']==27669 and totals['draw_normal']==38469,totals
+          assert sum(r['played_kyoku_count'] for r in allrows)==100952
+          for r in rows:
+            assert r['combined_red']==r['deal_red']+r['draw_red']
+            assert r['combined_normal']==r['deal_normal']+r['draw_normal']
+            assert r['combined_total']==r['combined_red']+r['combined_normal']
+          fields=list(rows[0])
+          out=Path('results');out.mkdir(exist_ok=True)
+          with (out/'dora_dealt_plus_tsumo_all_periods.csv').open('w',encoding='utf-8-sig',newline='') as f:
+            w=csv.DictWriter(f,fieldnames=fields);w.writeheader();w.writerows(rows)
+          metrics=('red_per_100_kyoku','normal_per_100_kyoku','total_per_100_kyoku')
+          for period in ['ALL']+sorted({r['period'] for r in rows if r['period']!='ALL'}):
+            group=[r.copy() for r in rows if r['period']==period]
+            for m in metrics:
+              ranked=sorted(group,key=lambda r:(-r[m],-r['combined_total'],r['player_name']))
+              ranks={r['player_id']:i+1 for i,r in enumerate(ranked)}
+              for r in group:r['rank_'+m]=ranks[r['player_id']]
+            with (out/f'dora_dealt_plus_tsumo_{period}.csv').open('w',encoding='utf-8-sig',newline='') as f:
+              w=csv.DictWriter(f,fieldnames=list(group[0]));w.writeheader();w.writerows(group)
+          uchikawa=[r for r in rows if r['player_name']=='内川幸太郎']
+          assert len(uchikawa)==10,[(r['period'],r['player_name']) for r in uchikawa]
+          # Rank Uchikawa using the same per-100-participant-kyoku denominator across each period.
+          answer=[]
+          for period in ['ALL']+sorted({r['period'] for r in rows if r['period']!='ALL'}):
+            group=[r for r in rows if r['period']==period]
+            for metric in metrics:
+              ranked=sorted(group,key=lambda r:(-r[metric],-r['combined_total'],r['player_name']))
+              r=next(x for x in ranked if x['player_name']=='内川幸太郎')
+              answer.append({'period':period,'metric':metric, 'rank':ranked.index(r)+1, 'value':r[metric]})
+          validation={'baseline_release':'20261120-2341-04338cbb','database_quick_check':'ok',
+            'players':56,'player_kyoku':100952,'draw_dora_red':totals['draw_red'],
+            'draw_dora_normal':totals['draw_normal'],'dealt_red':totals['deal_red'],
+            'dealt_normal':totals['deal_normal'],'total_dealt_plus_tsumo_red':totals['deal_red']+totals['draw_red'],
+            'total_dealt_plus_tsumo_normal':totals['deal_normal']+totals['draw_normal'],
+            'uchikawa':uchikawa,'uchikawa_ranks':answer}
+          (out/'validation.json').write_text(json.dumps(validation,ensure_ascii=False,indent=2),encoding='utf-8')
+          print(json.dumps(validation,ensure_ascii=False),flush=True)
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: dora-dealt-plus-tsumo-20261120
+          path: results/
+          if-no-files-found: warn
+          retention-days: 7
