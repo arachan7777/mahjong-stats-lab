@@ -78,7 +78,7 @@ def event_rows(c,ky):
       LEFT JOIN agari_event a ON a.event_id=e.id
       WHERE e.kyoku_id=? ORDER BY e.event_order,e.id""",(ky,))
 def finish(s,sticks,initial_seats):
-    # Match-end unclaimed riichi sticks are a distinct settlement, not a draw-time transfer.
+    # Reference-only possible final settlement. DB game.score retains unclaimed sticks outside player scores; do not apply this to actual replay or match criterion.
     final=dict(s)
     top=min(s,key=lambda p:(-s[p],initial_seats[p]))
     final[top]+=1000*sticks
@@ -100,7 +100,7 @@ def main():
         dw=csv.writer(ds);kw=csv.writer(ks);gw=csv.writer(gs);pw=csv.writer(ps)
         dw.writerow(["event_id","event_order","game_id","kyoku_id","draw_actor_player_id","tile","rinshan","honba","kyotaku_sticks"]+[f"{field}_{i}" for i in range(1,5) for field in ("player_id","score","average_rank")])
         kw.writerow(["game_id","kyoku_id","round","honba","start_scores","start_sticks","replayed_end_scores","recorded_end_scores","end_sticks","replayed_average_ranks","recorded_score_average_ranks","match","error"])
-        gw.writerow(["game_id","raw_end_scores","remaining_sticks","settlement_top","settled_scores","recorded_scores","raw_match","settled_match","match","error"])
+        gw.writerow(["game_id","raw_end_scores","remaining_sticks","reference_settlement_top","reference_settled_scores","recorded_scores","raw_match","reference_settled_match","match","error"])
         pw.writerow(["game_id","kyoku_id","event_id","event_order","type","before_scores","after_scores","before_sticks","after_sticks","recorded_base","recorded_honba","recorded_kyotaku","actor","target","accepted","error"])
         for g in games:
             gid=g["id"]
@@ -163,12 +163,13 @@ def main():
                 last=ky
             final,top=finish(s,sticks,initial_seats)
             raw_ok=s==gr; settled_ok=final==gr
-            ok=not game_error and settled_ok
+            ok=not game_error and raw_ok
             counters["game_checked"]+=1;counters["game_match"]+=ok;counters["game_raw_match"]+=raw_ok
-            counters["game_final_pot_settlement"]+=bool(sticks)
+            counters["game_remaining_pot"]+=bool(sticks)
+            counters["reference_settlement_matches_db"]+=settled_ok
             gw.writerow([gid,js(s),sticks,top,js(final),js(gr),int(raw_ok),int(settled_ok),int(ok),game_error])
-            if not ok:bad.append({"level":"game","game_id":gid,"replayed":final,"recorded":gr,"error":game_error})
-    m.update(dict(counters));m.update(unique_draw_ids=len(seen),difference_rows=len(bad),errors=len(errors),special_event_found=special is not None)
+            if not ok:bad.append({"level":"game","game_id":gid,"replayed":s.copy(),"recorded":gr,"error":game_error})
+    m.update(dict(counters));m.update(game_comparison_basis="raw reconstructed scores vs DB game_player_result.score; remaining sticks recorded separately", reference_settlement_basis="illustrative only; not actual score", unique_draw_ids=len(seen),difference_rows=len(bad),errors=len(errors),special_event_found=special is not None)
     jwrite(a.out/"differences.json",bad);jwrite(a.out/"errors.json",errors);jwrite(a.out/"honba_2530825.json",special);jwrite(a.out/"real_examples.json",examples)
     ok=(counters["snapshots"]==1257732==len(seen)==counters["rank_sum_10"] and counters["kyoku_match"]==25238==counters["kyoku_checked"] and counters["game_match"]==2068==counters["game_checked"] and not bad and not errors and special is not None)
     m["status"]="matched" if ok else "requires_review"
