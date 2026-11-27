@@ -75,12 +75,12 @@ jobs:
               assert n>=r['available_tile_count'],(r['id'],n,r['available_tile_count'])
               for b in [counts[r['name']],league]:
                   b['total']+=1;b[n]+=1
-              if n<=2: shape[r['waiting_type']]+=1
+              if n<=3: shape[r['waiting_type']]+=1
           result=[]
           for name,b in counts.items():
-              n=sum(b[i] for i in range(3))
-              result.append([name,b['total'],b[0],b[1],b[2],n,round(100*n/b['total'],4)])
-          result.sort(key=lambda r:(-r[5]/r[1],-r[5],r[0]))
+              n=sum(b[i] for i in range(4))
+              result.append([name,b['total'],b[0],b[1],b[2],b[3],n,round(100*n/b['total'],4)])
+          result.sort(key=lambda r:(-r[6]/r[1],-r[6],r[0]))
           assert len(result)==56
           print('RANKING_JSON='+json.dumps(result,ensure_ascii=False,separators=(',',':')),flush=True)
           print('LEAGUE_JSON='+json.dumps(dict(league),ensure_ascii=False),flush=True)
