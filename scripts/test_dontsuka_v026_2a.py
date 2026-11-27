@@ -32,6 +32,20 @@ class Stage2ATests(unittest.TestCase):
         self.assertEqual(len(h),11)
         self.assertTrue(f["is_rinshan"])
         self.assertIn("嶺上開花",score_hand(r,"5z")["yaku"])
+    def test_hidden_ankan_red_preserved(self):
+        r=seed("0m,5m,5m,2m,3m,4m,2p,3p,4p,2s,3s,4s,5z")
+        draw(r,"5m")
+        step(r,"ankan",t="5m",block="_5m5m_")
+        draw(r,"5z",True)
+        h,m,f=r.winning(1,"5z",True)
+        self.assertEqual(m,[("ankan",["0m","5m","5m","5m"])])
+        self.assertEqual(score_hand(r,"5z")["yaku"]["赤ドラ"],1)
+    def test_called_chi_out_of_order(self):
+        h=["9p","9p","7s","7p","6s","6p","5p","5s"]
+        m=[("chi",["6m","5m","7m"]),("chi",["7p","5p","6p"])]
+        f=dict(is_tsumo=True,first_uninterrupted=False)
+        v=evaluate(h,m,"5s",f,"2z","1z",[],[])
+        self.assertEqual(v["yaku"]["三色同順"],1)
     def test_daiminkan_rinshan(self):
         r=seed("1m,1m,1m,2m,3m,4m,2p,3p,4p,2s,3s,4s,5z")
         step(r,"haipai",2,hand="1m")
