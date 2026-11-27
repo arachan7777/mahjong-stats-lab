@@ -76,7 +76,7 @@ class Stage2ATests(unittest.TestCase):
     def test_red_and_ura_separate(self):
         r=seed("2m,3m,4m,4p,0p,6p,2s,3s,4s,6s,7s,8s,5z")
         draw(r,"6z");discard(r,"6z",declaration=True);step(r,"reach",accepted=True)
-        draw(r,"5z");r.omote=["4p"];r.ura=["4z"]
+        draw(r,"5z");r.omote=["4p"];r.ura=["7z"]
         y=score_hand(r,"5z")["yaku"]
         self.assertEqual(y["ドラ"],1);self.assertEqual(y["赤ドラ"],1);self.assertEqual(y["裏ドラ"],2)
     def test_no_silent_tile_substitution(self):
