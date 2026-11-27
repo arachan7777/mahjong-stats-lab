@@ -1,0 +1,88 @@
+name: Trial visible two tile riichi
+on:
+  push:
+    branches: [trial/visible-two-riichi-20261127]
+permissions:
+  contents: read
+jobs:
+  rank:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Fixed DB and ranking
+        run: |
+          set -euo pipefail
+          curl -fL --retry 2 https://github.com/konoui/m-league-game-db/releases/download/20261120-2341-04338cbb/database.zip -o /tmp/db.zip
+          python - <<'PY'
+          import zipfile,shutil,sqlite3,re,json
+          from collections import Counter,defaultdict
+          z=zipfile.ZipFile('/tmp/db.zip')
+          files=[f for f in z.namelist() if f.endswith(('.sqlite3','.sqlite','.db'))]
+          assert len(files)==1,files
+          with z.open(files[0]) as a,open('/tmp/db.sqlite3','wb') as b: shutil.copyfileobj(a,b)
+          c=sqlite3.connect('file:/tmp/db.sqlite3?mode=ro',uri=True)
+          c.row_factory=sqlite3.Row
+          c.execute('PRAGMA temp_store=MEMORY')
+          assert c.execute('select count(*) from game').fetchone()[0]==2068
+          assert c.execute('select count(*) from kyoku').fetchone()[0]==25238
+          def norm(t):
+              t=t.strip().lstrip('t^')
+              return '5'+t[1:] if t.startswith('0') else t
+          def tiles(s): return [norm(x) for x in s.split(',') if x.strip()]
+          def block(s):
+              out=[]
+              for digits,suit in re.findall(r'([0-9-]+)([mpsz])',s):
+                  out.extend(norm(i+suit) for i in digits if i.isdigit())
+              return out
+          rows=list(c.execute("""
+          SELECT e.kyoku_id,e.event_order, e.id, r.actor_player_id pid,
+                 p.name, pts.waiting_tiles, pts.available_tile_count, ps.hand, pts.waiting_type
+          FROM reach_event r JOIN event er ON er.id=r.event_id
+          JOIN event e ON e.kyoku_id=er.kyoku_id AND e.event_order=er.event_order+1
+          JOIN discard_event d ON d.event_id=e.id AND d.actor_player_id=r.actor_player_id AND d.is_reach_declaration=1
+          JOIN player_tenpai_state pts ON pts.event_id=e.id AND pts.player_id=r.actor_player_id AND pts.is_actor=1
+          JOIN player_state ps ON ps.event_id=e.id AND ps.player_id=r.actor_player_id
+          JOIN player p ON p.id=r.actor_player_id
+          WHERE r.is_accepted=1 ORDER BY e.kyoku_id,e.event_order
+          """))
+          assert len(rows)==22205 and len({r['id'] for r in rows})==22205
+          keys={r['kyoku_id'] for r in rows}
+          public=defaultdict(list)
+          for r in c.execute("""
+          SELECT e.kyoku_id,e.event_order,d.tile FROM discard_event d JOIN event e ON e.id=d.event_id
+          UNION ALL SELECT e.kyoku_id,e.event_order,d.dora_indicator_tile FROM dora_indicator_event d JOIN event e ON e.id=d.event_id WHERE d.dora_type='omote'
+          """):
+              if r[0] in keys: public[r[0]].append((r[1],[norm(r[2])]))
+          for table,n in [('chi_event',3),('pon_event',3),('daiminkan_event',4),('ankan_event',4),('shominkan_event',4)]:
+              for ky,order,t,b in c.execute(f'SELECT e.kyoku_id,e.event_order,d.tile,d.block FROM {table} d JOIN event e ON e.id=d.event_id'):
+                  if ky not in keys: continue
+                  if table=='shominkan_event': extra=[norm(t)]
+                  elif table=='ankan_event': extra=[norm(t)]*4
+                  else:
+                      extra=block(b)
+                      assert len(extra)==n and norm(t) in extra,(table,t,b,extra)
+                      extra.remove(norm(t))
+                  public[ky].append((order,extra))
+          counts=defaultdict(Counter); league=Counter(); shape=Counter()
+          for r in rows:
+              wait=set(tiles(r['waiting_tiles']))
+              assert wait and all(re.fullmatch('[1-9][mps]|[1-7]z',x) for x in wait),(r['id'],wait)
+              seen=Counter(tiles(r['hand']))
+              for order,ts in public[r['kyoku_id']]:
+                  if order<=r['event_order']: seen.update(ts)
+              assert all(0<=seen[t]<=4 for t in wait),(r['id'],wait,seen)
+              n=sum(4-seen[t] for t in wait)
+              assert n>=r['available_tile_count'],(r['id'],n,r['available_tile_count'])
+              for b in [counts[r['name']],league]:
+                  b['total']+=1;b[n]+=1
+              if n<=2: shape[r['waiting_type']]+=1
+          result=[]
+          for name,b in counts.items():
+              n=sum(b[i] for i in range(3))
+              result.append([name,b['total'],b[0],b[1],b[2],n,round(100*n/b['total'],4)])
+          result.sort(key=lambda r:(-r[5]/r[1],-r[5],r[0]))
+          assert len(result)==56
+          print('RANKING_JSON='+json.dumps(result,ensure_ascii=False,separators=(',',':')),flush=True)
+          print('LEAGUE_JSON='+json.dumps(dict(league),ensure_ascii=False),flush=True)
+          print('SHAPE_JSON='+json.dumps(dict(shape),ensure_ascii=False),flush=True)
+          PY
