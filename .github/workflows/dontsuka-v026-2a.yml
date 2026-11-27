@@ -49,6 +49,18 @@ jobs:
         run: |
           set -o pipefail
           python -u scripts/dontsuka_v026_2a_audit.py /tmp/mahjong-fixed.sqlite3 results/dontsuka_v026_2a 2>&1 | tee results/dontsuka_v026_2a/audit.log
+      - name: Finalize and verify manifest hashes after audit log closes
+        run: |
+          python - <<'PY'
+          import hashlib, json
+          from pathlib import Path
+          out=Path('results/dontsuka_v026_2a')
+          path=out/'manifest.json'
+          m=json.loads(path.read_text())
+          m['outputs']={p.name:hashlib.file_digest(p.open('rb'),'sha256').hexdigest()
+                        for p in sorted(out.iterdir()) if p.is_file() and p!=path}
+          path.write_text(json.dumps(m,ensure_ascii=False,indent=2)+'\n',encoding='utf-8')
+          PY
       - name: Preserve stage 2A evidence only
         if: always()
         uses: actions/upload-artifact@v4
