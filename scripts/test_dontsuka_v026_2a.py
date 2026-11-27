@@ -43,7 +43,7 @@ class Stage2ATests(unittest.TestCase):
     def test_called_chi_out_of_order(self):
         h=["9p","9p","7s","7p","6s","6p","5p","5s"]
         m=[("chi",["6m","5m","7m"]),("chi",["7p","5p","6p"])]
-        f=dict(is_tsumo=True,first_uninterrupted=False)
+        f=dict(is_tsumo=True,is_riichi=False,first_uninterrupted=False)
         v=evaluate(h,m,"5s",f,"2z","1z",[],[])
         self.assertEqual(v["yaku"]["三色同順"],1)
     def test_daiminkan_rinshan(self):
