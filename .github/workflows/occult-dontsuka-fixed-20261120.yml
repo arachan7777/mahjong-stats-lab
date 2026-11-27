@@ -1,0 +1,115 @@
+name: Occult Dontsuka Fixed DB 20261120
+
+on:
+  push:
+    branches:
+      - codex/occult-dontsuka-20261120-run-20261128
+    paths:
+      - .github/workflows/occult-dontsuka-fixed-20261120.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  aggregate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - name: Checkout isolated research branch
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Download and verify fixed DB release
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/occult_db"
+          ZIP="$RUNNER_TEMP/occult_db/database.zip"
+          curl --fail --location --retry 3 --output "$ZIP" \
+            https://github.com/konoui/m-league-game-db/releases/download/20261120-2341-04338cbb/database.zip
+          echo "e2e702402301ae136da71e3f79113f929e291779ff4997c24db5262aaa4ff548  $ZIP" | sha256sum --check --strict
+          printf '%s\n' "$ZIP" > "$RUNNER_TEMP/occult_db/archive_path.txt"
+
+      - name: Unpack package and fixed database
+        shell: bash
+        run: |
+          set -euo pipefail
+          PKG="$RUNNER_TEMP/occult_package"
+          DBROOT="$RUNNER_TEMP/occult_db/unpacked"
+          mkdir -p "$PKG" "$DBROOT"
+          base64 --decode research/occult_dontsuka_20261120/package.zip.b64 > "$RUNNER_TEMP/occult_package.zip"
+          unzip -q "$RUNNER_TEMP/occult_package.zip" -d "$PKG"
+          unzip -q "$RUNNER_TEMP/occult_db/database.zip" -d "$DBROOT"
+          mapfile -t DBS < <(find "$DBROOT" -type f \( -iname '*.sqlite3' -o -iname '*.sqlite' -o -iname '*.db' \))
+          if [ "${#DBS[@]}" -ne 1 ]; then
+            echo "Expected exactly one SQLite database; found ${#DBS[@]}." >&2
+            find "$DBROOT" -maxdepth 3 -type f -print >&2
+            exit 1
+          fi
+          cp "${DBS[0]}" "$RUNNER_TEMP/occult_db/fixed.sqlite3"
+          printf '%s\n' "$PKG" > "$RUNNER_TEMP/occult_package_path.txt"
+
+      - name: Run fixed-version aggregation and baseline checks
+        shell: bash
+        run: |
+          set -euo pipefail
+          PKG="$(cat "$RUNNER_TEMP/occult_package_path.txt")"
+          python -u "$PKG/aggregate.py" "$RUNNER_TEMP/occult_db/fixed.sqlite3" --out "$RUNNER_TEMP/occult_results"
+
+      - name: Write verification record
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - "$RUNNER_TEMP/occult_results/manifest.json" "$RUNNER_TEMP/occult_results/verification.txt" "$RUNNER_TEMP/occult_db/database.zip" "$RUNNER_TEMP/occult_db/fixed.sqlite3" <<'PY'
+          import hashlib, json, sqlite3, sys
+          manifest_path, out_path, zip_path, db_path = sys.argv[1:]
+          with open(manifest_path, encoding="utf-8") as f:
+              m = json.load(f)
+          with open(zip_path, "rb") as f:
+              archive_sha = hashlib.file_digest(f, "sha256").hexdigest()
+          con = sqlite3.connect("file:" + db_path + "?mode=ro", uri=True)
+          check = con.execute("PRAGMA quick_check").fetchone()[0]
+          con.close()
+          assert m["release"] == "20261120-2341-04338cbb"
+          assert archive_sha == "e2e702402301ae136da71e3f79113f929e291779ff4997c24db5262aaa4ff548"
+          assert check == "ok"
+          assert m["status"] == "success"
+          assert m["baseline_mismatches"] == 0 and m["game_id_mismatches"] == 0
+          assert m["games"] == 2068 and m["players"] == 56
+          assert m["draws"] == 1257732 and m["hits"] == 27578
+          assert m["partition_checks"] == "passed"
+          with open(out_path, "w", encoding="utf-8") as f:
+              f.write("status=success\n")
+              f.write("release=" + m["release"] + "\n")
+              f.write("database_zip_sha256=" + archive_sha + "\n")
+              f.write("database_sha256=" + m["sha256"] + "\n")
+              f.write("quick_check=" + check + "\n")
+              f.write("games=" + str(m["games"]) + "\n")
+              f.write("players=" + str(m["players"]) + "\n")
+              f.write("draws=" + str(m["draws"]) + "\n")
+              f.write("hits=" + str(m["hits"]) + "\n")
+              f.write("baseline_mismatches=" + str(m["baseline_mismatches"]) + "\n")
+              f.write("game_id_mismatches=" + str(m["game_id_mismatches"]) + "\n")
+              f.write("partition_checks=" + m["partition_checks"] + "\n")
+          PY
+          cat "$RUNNER_TEMP/occult_results/verification.txt" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload CSV outputs and verification records only
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: occult-dontsuka-results-20261120
+          path: |
+            ${{ runner.temp }}/occult_results/per_game_player.csv
+            ${{ runner.temp }}/occult_results/overall.csv
+            ${{ runner.temp }}/occult_results/player_conditions.csv
+            ${{ runner.temp }}/occult_results/rankings.csv
+            ${{ runner.temp }}/occult_results/manifest.json
+            ${{ runner.temp }}/occult_results/verification.txt
+          if-no-files-found: error
+          retention-days: 14
