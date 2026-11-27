@@ -1,0 +1,59 @@
+name: ドンツカ総合研究 v0.26 第2工程A
+on:
+  push:
+    branches: [codex/dontsuka-v026-base-20261128]
+    paths:
+      - '.github/workflows/dontsuka-v026-2a.yml'
+      - 'scripts/dontsuka_v026_2a_*.py'
+      - 'scripts/test_dontsuka_v026_2a.py'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Prepare isolated output and evaluator
+        run: |
+          mkdir -p results/dontsuka_v026_2a
+          python -m pip install mahjong==1.4.0
+          python -m pip freeze > results/dontsuka_v026_2a/requirements-resolved.txt
+      - name: Artificial tests
+        shell: bash
+        run: |
+          set -o pipefail
+          python scripts/test_dontsuka_v026_2a.py 2>&1 | tee results/dontsuka_v026_2a/artificial_tests.txt
+      - name: Retrieve verified fixed DB
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --location --retry 3 https://github.com/konoui/m-league-game-db/releases/download/20261120-2341-04338cbb/database.zip -o /tmp/mahjong-database.zip
+          echo 'e2e702402301ae136da71e3f79113f929e291779ff4997c24db5262aaa4ff548  /tmp/mahjong-database.zip' | sha256sum --check
+          python - <<'PY'
+          import shutil, zipfile
+          from pathlib import Path
+          with zipfile.ZipFile('/tmp/mahjong-database.zip') as z:
+              candidates=[x for x in z.infolist() if not x.is_dir() and Path(x.filename).suffix.lower() in {'.sqlite3','.sqlite','.db','.db3'}]
+              if len(candidates)!=1 or candidates[0].file_size!=873754624:
+                  raise RuntimeError('Unexpected database archive')
+              with z.open(candidates[0]) as src, open('/tmp/mahjong-fixed.sqlite3','wb') as dst:
+                  shutil.copyfileobj(src,dst)
+          PY
+      - name: Actual-win audit
+        shell: bash
+        run: |
+          set -o pipefail
+          python -u scripts/dontsuka_v026_2a_audit.py /tmp/mahjong-fixed.sqlite3 results/dontsuka_v026_2a 2>&1 | tee results/dontsuka_v026_2a/audit.log
+      - name: Preserve stage 2A evidence only
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dontsuka-v026-2a-${{ github.run_id }}-${{ github.run_attempt }}
+          path: results/dontsuka_v026_2a/
+          if-no-files-found: warn
+          retention-days: 30
