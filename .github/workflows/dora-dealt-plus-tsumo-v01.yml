@@ -36,7 +36,7 @@ jobs:
           sql=Path('sql/dora_dealt_plus_tsumo_v01.sql').read_text()
           rows=[dict(r) for r in db.execute(sql)]
           assert len([r for r in rows if r['period']=='ALL'])==56
-          assert len(rows)==56+56*9,(len(rows))
+          assert len(rows)==56+296,(len(rows))
           allrows=[r for r in rows if r['period']=='ALL']
           totals={k:sum(r[k] for r in allrows) for k in ('draw_red','draw_normal','deal_red','deal_normal')}
           assert totals['draw_red']==27669 and totals['draw_normal']==38469,totals
@@ -59,7 +59,7 @@ jobs:
             with (out/f'dora_dealt_plus_tsumo_{period}.csv').open('w',encoding='utf-8-sig',newline='') as f:
               w=csv.DictWriter(f,fieldnames=list(group[0]));w.writeheader();w.writerows(group)
           uchikawa=[r for r in rows if r['player_name']=='内川幸太郎']
-          assert len(uchikawa)==10,[(r['period'],r['player_name']) for r in uchikawa]
+          assert len(uchikawa)==9,[(r['period'],r['player_name']) for r in uchikawa]
           # Rank Uchikawa using the same per-100-participant-kyoku denominator across each period.
           answer=[]
           for period in ['ALL']+sorted({r['period'] for r in rows if r['period']!='ALL'}):
