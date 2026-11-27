@@ -51,7 +51,7 @@ def physical(h,m,win):
     melds=[]
     for k,b in m:
         melds.append(Meld(meld_type=Meld.CHI if k=="chi" else Meld.PON if k=="pon" else Meld.KAN,
-                          tiles=[alloc(t) for t in b], opened=k!="ankan"))
+                          tiles=sorted(alloc(t) for t in b), opened=k!="ankan"))
     return concealed+[n for m in melds for n in m.tiles],w,melds
 
 def evaluate(h,m,win,flags,player_wind,round_wind,omote,ura):
