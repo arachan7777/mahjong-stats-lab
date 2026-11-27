@@ -75,7 +75,16 @@ class Replay:
             if e["accepted"]: self.reaches.add(p)
         elif k in TYPES:
             t=tile(t)
-            b=block(e["block"])
+            raw=e["block"]
+            if k=="ankan" and re.fullmatch(r"_(?:[0-9][mpsz]){2}_",raw):
+                # Two outer tiles are concealed in the DB notation. Recover
+                # all four from the physical hand, without assuming their red status.
+                visible=block(raw[1:-1])
+                b=[x for x in self.hands[p] if normal(x)==normal(t)]
+                if len(b)!=4 or Counter(visible)-Counter(b) or any(normal(x)!=normal(t) for x in visible):
+                    raise ValueError("concealed kan tiles disagree with event")
+            else:
+                b=block(raw)
             if len(b)!=(3 if k in ("chi","pon") else 4):
                 raise ValueError("unexpected meld length")
             if k=="shominkan":
