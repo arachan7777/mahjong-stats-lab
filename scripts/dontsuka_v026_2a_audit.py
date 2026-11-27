@@ -4,6 +4,7 @@ from collections import Counter, defaultdict
 from pathlib import Path
 from importlib.metadata import version
 from mahjong.hand_calculating.hand import HandCalculator
+from mahjong.hand_calculating.fu import FuCalculator
 from mahjong.hand_calculating.hand_config import HandConfig, OptionalRules
 from mahjong.meld import Meld
 from mahjong.utils import plus_dora
@@ -22,6 +23,14 @@ NAMES = dict(tsumo="門前清自摸和", riichi="立直", ippatsu="一発", chan
  daisangen="大三元", shosuushi="小四喜", daisuushi="大四喜", ryuisou="緑一色",
  suukantsu="四槓子", tsuisou="字一色", chinroto="清老頭", tenhou="天和", chiihou="地和",
  aka_dora="赤ドラ", dora="ドラ")
+
+# M.League official rule chapter 6: double-wind pair is 2 fu, not 4.
+# https://m-league.jp/about/ ; deduplicate only the fu input, not wind-yaku evaluation.
+_original_fu = FuCalculator.calculate_fu
+def mleague_fu(self,hand,win_tile,win_group,config,valued_tiles=None,melds=None):
+    return _original_fu(self,hand,win_tile,win_group,config,
+                        list(dict.fromkeys(valued_tiles or [])),melds)
+FuCalculator.calculate_fu = mleague_fu
 
 def index(t):
     t=normal(tile(t))
