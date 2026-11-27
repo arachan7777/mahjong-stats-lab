@@ -64,6 +64,7 @@ jobs:
           answer=[]
           for period in ['ALL']+sorted({r['period'] for r in rows if r['period']!='ALL'}):
             group=[r for r in rows if r['period']==period]
+            if not any(x['player_name']=='内川幸太郎' for x in group): continue
             for metric in metrics:
               ranked=sorted(group,key=lambda r:(-r[metric],-r['combined_total'],r['player_name']))
               r=next(x for x in ranked if x['player_name']=='内川幸太郎')
