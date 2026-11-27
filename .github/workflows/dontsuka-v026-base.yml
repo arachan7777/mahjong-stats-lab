@@ -1,0 +1,60 @@
+name: ドンツカ総合研究 v0.26 基礎抽出
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  extract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - name: リポジトリを取得
+        uses: actions/checkout@v4
+
+      - name: Pythonを準備
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: 承認済み固定版SQLiteを取得
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --location --retry 3 \
+            https://github.com/konoui/m-league-game-db/releases/download/20261120-2341-04338cbb/database.zip \
+            --output /tmp/mahjong-database.zip
+          echo 'e2e702402301ae136da71e3f79113f929e291779ff4997c24db5262aaa4ff548  /tmp/mahjong-database.zip' \
+            | sha256sum --check --status
+          python - <<'PY'
+          import shutil
+          import zipfile
+          from pathlib import Path
+
+          archive = zipfile.ZipFile('/tmp/mahjong-database.zip')
+          candidates = [item for item in archive.infolist()
+                        if not item.is_dir()
+                        and Path(item.filename).suffix.lower() in {'.sqlite3', '.sqlite', '.db', '.db3'}]
+          if len(candidates) != 1 or candidates[0].file_size != 873754624:
+              raise RuntimeError(f'Unexpected SQLite archive members: {[(x.filename, x.file_size) for x in candidates]}')
+          with archive.open(candidates[0]) as source, open('/tmp/mahjong-fixed.sqlite3', 'wb') as target:
+              shutil.copyfileobj(source, target, 1024 * 1024)
+          PY
+
+      - name: 読み取り専用で基礎抽出・照合
+        run: >-
+          python -u scripts/dontsuka_v026_extract.py
+          /tmp/mahjong-fixed.sqlite3
+          --release-id 20261120-2341-04338cbb
+          --output-dir results/dontsuka_v026
+
+      - name: 集計結果を保存（生DBは含めない）
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dontsuka-v026-base-20261120
+          path: results/dontsuka_v026/
+          if-no-files-found: warn
+          retention-days: 30
