@@ -1,0 +1,43 @@
+name: 希少役11種・選手別集計（研究用）
+on:
+  push:
+    branches:
+      - trial/rare-yaku-ranking-20261127
+permissions:
+  contents: read
+jobs:
+  compute:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: 固定版DBから読み取り専用で集計
+        run: |
+          set -euo pipefail
+          curl -fL --retry 3 'https://github.com/konoui/m-league-game-db/releases/download/20261120-2341-04338cbb/database.zip' -o /tmp/database.zip
+          python -u - <<'PY'
+          import sqlite3,zipfile,shutil,collections,json
+          with zipfile.ZipFile('/tmp/database.zip') as z:
+            fs=[x for x in z.infolist() if not x.is_dir() and x.filename.endswith('.sqlite3')]
+            assert len(fs)==1
+            with z.open(fs[0]) as src,open('/tmp/ml.sqlite3','wb') as dst:shutil.copyfileobj(src,dst)
+          db=sqlite3.connect('file:/tmp/ml.sqlite3?mode=ro',uri=True)
+          db.execute('PRAGMA query_only=ON')
+          for t,n in [('game',2068),('kyoku',25238),('agari_event',20173)]:
+            assert db.execute('SELECT count(*) FROM '+t).fetchone()[0]==n
+          names=['小四喜','搶槓','混老頭','大三元','国士無双','二盃口','四暗刻','小三元','ダブル立直','嶺上開花','純全帯么九']
+          expected=[1,2,3,6,7,10,19,21,43,43,43]
+          totals=dict(db.execute('SELECT p.name,count(*) FROM agari_event a JOIN player p ON p.id=a.actor_player_id GROUP BY p.id'))
+          rows=db.execute('SELECT DISTINCT p.name,a.event_id,n.name FROM agari_yaku y JOIN yaku_name n ON n.id=y.yaku_name_id JOIN agari_event a ON a.event_id=y.agari_event_id JOIN player p ON p.id=a.actor_player_id WHERE n.name IN ('+','.join('?'*len(names))+')',names).fetchall()
+          c=collections.Counter(y for p,e,y in rows)
+          assert [c[n] for n in names]==expected, c
+          result=[]
+          for p,w in totals.items():
+            rr=[(e,y) for pp,e,y in rows if pp==p]
+            counts=collections.Counter(y for e,y in rr)
+            result.append([p,w,len(rr),len(set(e for e,y in rr)),len(counts),[counts[n] for n in names]])
+          result.sort(key=lambda r:(-r[2],r[0]))
+          print('RARE_NAMES',json.dumps(names,ensure_ascii=False))
+          print('RARE_RANK',json.dumps(result,ensure_ascii=False))
+          print('RARE_TOTAL',json.dumps([len(rows),len(set(e for p,e,y in rows)),len(totals)],ensure_ascii=False))
+          print('RARE_EVENTS',json.dumps(db.execute('SELECT DISTINCT p.name,a.event_id,n.name,g.id,g.date,k.round,k.honba FROM agari_yaku y JOIN yaku_name n ON n.id=y.yaku_name_id JOIN agari_event a ON a.event_id=y.agari_event_id JOIN player p ON p.id=a.actor_player_id JOIN event e ON e.id=a.event_id JOIN kyoku k ON k.id=e.kyoku_id JOIN game g ON g.id=k.game_id WHERE n.name IN (?,?,?)',names[:3]).fetchall(),ensure_ascii=False)) if False else None
+          PY
