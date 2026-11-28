@@ -1,0 +1,80 @@
+name: 20261128 DB verified archive staging parts
+on:
+  push:
+    branches:
+      - ops/db-20261128-validated-chunks
+    paths:
+      - .github/workflows/transfer-validated-db-20261128.yml
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  split-verified-artifact:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Download previous verified job artifact and validate checksum
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          curl --retry 3 --fail --show-error --location --silent \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            -o source-artifact.zip \
+            "https://api.github.com/repos/${{ github.repository }}/actions/artifacts/15264407160/zip"
+          echo "aeb08be51d1c35fc899d8a5e2cc63c0a6023094e862992f2c64cfd06cc89db58  source-artifact.zip" | sha256sum --check
+          unzip -l source-artifact.zip | tail -6
+          mkdir -p parts
+          split --bytes=85000000 --numeric-suffixes=0 --suffix-length=2 \
+            source-artifact.zip parts/mahjong-db-validated-20261128.zip.part
+          sha256sum parts/*.part* > parts/SHA256SUMS.txt
+          cat > parts/README-ja.txt <<'EOF'
+          2026-11-28 M-league game DB validated export archive.
+          Japanese: 4分割を番号順に結合すると GitHub Actions の検証済みZIPになります。
+          Original SHA256: aeb08be51d1c35fc899d8a5e2cc63c0a6023094e862992f2c64cfd06cc89db58
+          Original size: 325286139 bytes
+          Release: 20261128-0102-1b6bd367
+          Latest game date: 2026-11-27
+          Original archive contains: database.sqlite3, summary.json, summary.md
+          All four parts must be downloaded and their SHA256 verified before joining.
+          EOF
+          ls -lh parts
+      - name: Store part 00
+        uses: actions/upload-artifact@v4
+        with:
+          name: db-20261128-part00
+          path: parts/mahjong-db-validated-20261128.zip.part00
+          compression-level: 0
+          retention-days: 7
+      - name: Store part 01
+        uses: actions/upload-artifact@v4
+        with:
+          name: db-20261128-part01
+          path: parts/mahjong-db-validated-20261128.zip.part01
+          compression-level: 0
+          retention-days: 7
+      - name: Store part 02
+        uses: actions/upload-artifact@v4
+        with:
+          name: db-20261128-part02
+          path: parts/mahjong-db-validated-20261128.zip.part02
+          compression-level: 0
+          retention-days: 7
+      - name: Store part 03
+        uses: actions/upload-artifact@v4
+        with:
+          name: db-20261128-part03
+          path: parts/mahjong-db-validated-20261128.zip.part03
+          compression-level: 0
+          retention-days: 7
+      - name: Store manifest
+        uses: actions/upload-artifact@v4
+        with:
+          name: db-20261128-manifest
+          path: |
+            parts/SHA256SUMS.txt
+            parts/README-ja.txt
+          retention-days: 30
