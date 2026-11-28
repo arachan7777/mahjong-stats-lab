@@ -33,7 +33,7 @@ def candidates(h,m):
     out=[]
     for t in shape(vector(h)):
         if counts[t]>=4:continue
-        if t[0]=="5":
+        if t[0]=="5" and t[1]!="z":
             if own[t]<3:out.append(t)
             red="0"+t[1]
             if own[red]<1:out.append(red)
