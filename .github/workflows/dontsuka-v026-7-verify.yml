@@ -1,0 +1,50 @@
+name: ドンツカ総合研究 v0.26 第7工程独立イベント履歴検証
+on:
+  push:
+    branches: [codex/dontsuka-v026-base-20261128]
+    paths:
+      - '.github/workflows/dontsuka-v026-7-verify.yml'
+      - 'research/dontsuka_v026_7/verify_db_history.py'
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Pinned inputs
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          bash scripts/dontsuka_v026_5b_prepare.sh
+          gh api "/repos/$GITHUB_REPOSITORY/actions/artifacts/15260008983/zip" > /tmp/stage7.zip
+          echo '52a4fb032e4b7ba4847927ba1bed0fc1bcc996a6bb71d8c86974fcfa8dfd41b8  /tmp/stage7.zip' | sha256sum -c
+      - name: Verify event successors and exact genbutsu history with SQL
+        shell: bash
+        run: |
+          set -o pipefail
+          mkdir -p results/verify
+          python -u research/dontsuka_v026_7/verify_db_history.py /tmp/mahjong-fixed.sqlite3 /tmp/stage7.zip results/verify 52a4fb032e4b7ba4847927ba1bed0fc1bcc996a6bb71d8c86974fcfa8dfd41b8 2>&1 | tee results/verify/run.log
+      - name: Manifest after log close
+        if: always()
+        run: |
+          mkdir -p results/verify
+          cp research/dontsuka_v026_7/verify_db_history.py .github/workflows/dontsuka-v026-7-verify.yml results/verify/
+          python - <<'PY'
+          import hashlib,json
+          from pathlib import Path
+          p=Path('results/verify')
+          (p/'manifest.json').write_text(json.dumps({f.name:hashlib.file_digest(f.open('rb'),'sha256').hexdigest() for f in p.iterdir() if f.is_file() and f.name!='manifest.json'},indent=2))
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: dontsuka-v026-7-verify-${{ github.run_id }}
+          path: results/verify/
+          retention-days: 30
