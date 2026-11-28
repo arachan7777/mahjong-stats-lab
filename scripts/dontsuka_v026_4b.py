@@ -142,7 +142,7 @@ def main():
             sc=scoremap(end[ky]["start_scores"]);final=scoremap(end[ky]["recorded_end_scores"])
             if final!=scoremap(end[ky]["replayed_end_scores"]):raise ValueError("end scores")
             mvs={int(r["event_id"]):r for r in moves[ky]}
-            prev={k:((),(),()) for k in ks};ever=set();starts=Counter();ends=Counter();restarts=Counter()
+            prev={k:((),(),()) for k in ks};prev_evidence={k:{} for k in ks};ever=set();starts=Counter();ends=Counter();restarts=Counter()
             info=lambda k:dict(kyoku_id=ky,player_id=k[1],**meta[ky])
             evs=list(events(c,ky))
             for ev in evs:
@@ -200,10 +200,12 @@ def main():
                     t=transition(prev[k],s,k in ever)
                     if t:
                         starts[k]+=t=="start";ends[k]+=t=="end";restarts[k]+=t=="restart"
-                        row=dict(**info(k),event_id=eid,event_order=order,event_type=kind,actor=ev.get("actor"),transition=t,previous_down=js(prev[k][0]),previous_maintain=js(prev[k][1]),down_origins=js(s[0]),maintain_origins=js(s[1]),unknown_origins=js(s[2]),active_origins=js([origin_key(o) for o in active]),evidence=js([[list(x),d] for x,d in evidence.items()]),ended_possession_origins=js([origin_key(o) for o in os_ if int(o["end_event_order"])==order and o["end_reason"]=="zero"]))
+                        row=dict(**info(k),event_id=eid,event_order=order,event_type=kind,actor=ev.get("actor"),transition=t,previous_down=js(prev[k][0]),previous_maintain=js(prev[k][1]),down_origins=js(s[0]),maintain_origins=js(s[1]),unknown_origins=js(s[2]),active_origins=js([origin_key(o) for o in active]),evidence=js([[list(x),d] for x,d in evidence.items()]),ended_possession_origins=js([origin_key(o) for o in os_ if int(o["end_event_order"])==order and o["end_reason"]=="zero"]),
+                            origin_details=js([dict(draw_event_id=origin_key(o)[0],target=origin_key(o)[1],tile_type=o["tile_type"],rank_drop=float(o["rank_drop"]),start_event_id=int(o["start_event_id"]),end_event_id=int(o["end_event_id"]),end_reason=o["end_reason"]) for o in os_ if origin_key(o) in set(sum(prev[k],())+sum(s,()))]),
+                            previous_evidence=js([[list(x),d] for x,d in prev_evidence[k].items()]))
                         timeline.append(row);examples.setdefault(t,row)
                     if coexists(s):ever.add(k)
-                    prev[k]=s
+                    prev[k]=s;prev_evidence[k]=evidence
             if sc!=final:raise ValueError("2B final score mismatch")
             for k in ks:
                 if k in ever:rounds.append(dict(**info(k),starts=starts[k],ends=ends[k],restarts=restarts[k]))
