@@ -67,7 +67,7 @@ def main():
         require(eid not in expected_draw,"duplicate DB draw")
         expected_draw[eid]=(ky,o,pid,r["tile"],int(r["rinshan"]),link,d,end,kan)
     require(len(expected_draw)==1257732,"DB draw scope")
-    seen=set();counts=Counter();accepted_draw_discard={}
+    seen=set();counts=Counter();accepted_draw_discard={};unexpected=[]
     for r in rows(z,"final/all_draws.csv.gz"):
         eid=int(r["draw_event_id"]);require(eid not in seen and eid in expected_draw,"stage7 draw key");seen.add(eid)
         ky,o,pid,tile,rinshan,link,d,end,kan=expected_draw[eid]
@@ -79,6 +79,15 @@ def main():
             require(r["has_discard"]=="0" and end==(int(r["terminal_or_next_event_id"]),int(r["terminal_or_next_order"])),"no-discard successor")
             if kan:require(kan==(int(r["kan_event_id"]),r["kan_kind"],int(r["kan_order"])),"kan event identity")
         counts[link]+=1
+        if link not in ("discard","tsumo_win","kan_before_rinshan","kan_robbed"):
+            context=[dict(x) for x in c.execute("""SELECT e.id,e.event_order,e.type,
+              coalesce(dr.actor_player_id,ds.actor_player_id) AS actor,
+              coalesce(dr.tile,ds.tile) AS tile
+              FROM event e LEFT JOIN draw_event dr ON dr.event_id=e.id
+              LEFT JOIN discard_event ds ON ds.event_id=e.id
+              WHERE e.kyoku_id=? AND e.event_order>=? AND e.event_order<=?
+              ORDER BY e.event_order,e.id""",(ky,o-6,end[1]+6))]
+            unexpected.append(dict(detail=r,recorded_event_context=context))
     require(seen==set(expected_draw),"draw coverage")
     del expected_draw
     # Accepted riichi marker is emitted before its declaration discard in
@@ -123,8 +132,9 @@ def main():
         g[why]+=1
         if len(proof[why])<5:proof[why].append(r)
     require(len(pairseen)==28060,"opponent coverage")
-    result=dict(status="verified",database_sha256=DB_SHA,stage7_sha256=expected,package_members=len(m),draw_link_verified=len(seen),link_counts=dict(counts),accepted_declarations=len(declarations),discard_reach_boundary_verified=len(accepted_draw_discard),opponent_history_verified=len(pairseen),genbutsu_evidence_counts=dict(g),elapsed_seconds=time.monotonic()-start)
+    result=dict(status="verified",database_sha256=DB_SHA,stage7_sha256=expected,package_members=len(m),draw_link_verified=len(seen),link_counts=dict(counts),accepted_declarations=len(declarations),discard_reach_boundary_verified=len(accepted_draw_discard),opponent_history_verified=len(pairseen),genbutsu_evidence_counts=dict(g),unexpected_successors=len(unexpected),elapsed_seconds=time.monotonic()-start)
     (out/"summary.json").write_text(json.dumps(result,ensure_ascii=False,indent=2)+"\n",encoding="utf-8")
+    (out/"unexpected_successors.json").write_text(json.dumps(unexpected,ensure_ascii=False,indent=2)+"\n",encoding="utf-8")
     (out/"examples.json").write_text(json.dumps(proof,ensure_ascii=False,indent=2)+"\n",encoding="utf-8")
     print(json.dumps(result,ensure_ascii=False),flush=True)
 if __name__=="__main__":main()
