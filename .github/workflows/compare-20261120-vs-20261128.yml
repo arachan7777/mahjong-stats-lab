@@ -1,0 +1,80 @@
+name: Compare 20261120 and 20261128 frozen M-League databases
+on:
+  push:
+    branches:
+      - ops/db-20261128-validated-chunks
+    paths:
+      - .github/workflows/compare-20261120-vs-20261128.yml
+permissions:
+  contents: read
+jobs:
+  compare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Download and verify exact source releases
+        run: |
+          set -euo pipefail
+          curl -fsSL --retry 3 -o old.zip https://github.com/konoui/m-league-game-db/releases/download/20261120-2341-04338cbb/database.zip
+          echo 'e2e702402301ae136da71e3f79113f929e291779ff4997c24db5262aaa4ff548  old.zip' | sha256sum -c -
+          curl -fsSL --retry 3 -o new.zip https://github.com/konoui/m-league-game-db/releases/download/20261128-0102-1b6bd367/database.zip
+          echo '86e6650d032f430bc098d77e14470ff82d22c3cec3d247f97a874e8fb2f2ee4b  new.zip' | sha256sum -c -
+          mkdir -p old new results
+          unzip -j -q old.zip 'database.sqlite3' -d old
+          unzip -j -q new.zip 'database.sqlite3' -d new
+          echo 'Exact source ZIP SHA256 matched for both baselines'
+      - name: Independently compare old and new SQLite
+        run: |
+          python3 - <<'PY'
+          import sqlite3,json,datetime,pathlib
+          old=pathlib.Path('old/database.sqlite3').resolve()
+          new=pathlib.Path('new/database.sqlite3').resolve()
+          conn=sqlite3.connect(old.as_uri()+'?mode=ro', uri=True, timeout=120)
+          conn.execute("ATTACH DATABASE ? AS newdb",(new.as_uri()+'?mode=ro',))
+          def ident(x): return '"'+str(x).replace('"','""')+'"'
+          def cols(db,table):
+              return [(x[1],x[5]) for x in conn.execute(f'PRAGMA {db}.table_info({ident(table)})')]
+          report={'baseline':'20261120-2341-04338cbb','candidate':'20261128-0102-1b6bd367','compared_utc':datetime.datetime.now(datetime.timezone.utc).isoformat(),'tables':{}}
+          for table in ['game','kyoku','event']:
+              a=cols('main',table);b=cols('newdb',table)
+              ac={c for c,_ in a};bc={c for c,_ in b}
+              info={'before':conn.execute(f'SELECT count(*) FROM main.{ident(table)}').fetchone()[0],'after':conn.execute(f'SELECT count(*) FROM newdb.{ident(table)}').fetchone()[0],'common_columns':sorted(ac&bc),'old_only_columns':sorted(ac-bc),'new_only_columns':sorted(bc-ac)}
+              keys=[c for c,k in sorted(a,key=lambda x:x[1]) if k>0 and c in bc]
+              if not keys and 'id' in ac&bc:keys=['id']
+              if not keys:
+                  info['identity_comparison']='not_possible_no_confirmed_common_key'
+              else:
+                  info['key_columns']=keys
+                  condition=' AND '.join('o.'+ident(k)+' IS n.'+ident(k) for k in keys)
+                  info['removed_keys']=conn.execute(f'SELECT count(*) FROM main.{ident(table)} o WHERE NOT EXISTS (SELECT 1 FROM newdb.{ident(table)} n WHERE {condition})').fetchone()[0]
+                  info['added_keys']=conn.execute(f'SELECT count(*) FROM newdb.{ident(table)} n WHERE NOT EXISTS (SELECT 1 FROM main.{ident(table)} o WHERE {condition})').fetchone()[0]
+                  common=sorted((ac&bc)-set(keys))
+                  if common and table in ['game','kyoku']:
+                      mismatch=' OR '.join('NOT (o.'+ident(c)+' IS n.'+ident(c)+')' for c in common)
+                      info['retained_key_rows_with_changed_common_values']=conn.execute(f'SELECT count(*) FROM main.{ident(table)} o JOIN newdb.{ident(table)} n ON {condition} WHERE {mismatch}').fetchone()[0]
+                  if table=='game' and 'date' in ac&bc:
+                      rows=conn.execute(f'SELECT n.date,count(*) FROM newdb.game n WHERE NOT EXISTS (SELECT 1 FROM main.game o WHERE {condition}) GROUP BY n.date ORDER BY n.date').fetchall()
+                      info['added_games_by_date']=[{'date':dt,'games':v} for dt,v in rows]
+              report['tables'][table]=info
+          report['latest_game_date']=conn.execute('SELECT max(date) FROM newdb.game').fetchone()[0]
+          assert report['tables']['game']['before']==2068
+          assert report['tables']['kyoku']['before']==25238
+          assert report['tables']['game']['after']==2084
+          assert report['tables']['kyoku']['after']==25437
+          assert report['latest_game_date']=='2026-11-27'
+          for t in ['game','kyoku']:
+              inf=report['tables'][t]
+              assert inf.get('removed_keys')==0, (t,'removed',inf)
+              assert inf.get('added_keys')==inf['after']-inf['before'], (t,'added',inf)
+          report['status']='passed_baseline_counts_and_game_kyoku_keys'
+          pathlib.Path('results/compare.json').write_text(json.dumps(report,ensure_ascii=False,indent=2))
+          print(json.dumps(report,ensure_ascii=False,indent=2),flush=True)
+          PY
+      - name: Store independent comparison report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: db-20261128-vs-20261120-independent-comparison
+          path: results/compare.json
+          if-no-files-found: warn
+          retention-days: 30
