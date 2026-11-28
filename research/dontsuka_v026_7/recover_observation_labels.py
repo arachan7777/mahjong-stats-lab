@@ -31,12 +31,13 @@ def main():
         # Read the immediate significant event after the actual kan, not after
         # any later draw; no assumed replacement event is manufactured.
         anchor=int(r["kan_order"]) if r["kan_order"] else o
-        nxt=c.execute("""SELECT e.id,e.kyoku_id,e.event_order,e.type,d.actor_player_id,d.is_rinshan,d.tile
+        anchor_id=int(r["kan_event_id"] or r["draw_event_id"])
+        action_types="('draw','ron','tsumo','ryukyoku')" if r["kan_event_id"] else "('draw','discard','chi','pon','daiminkan','ankan','shominkan','ron','tsumo','ryukyoku')"
+        nxt=c.execute(f"""SELECT e.id,e.kyoku_id,e.event_order,e.type,d.actor_player_id,d.is_rinshan,d.tile
           FROM event e LEFT JOIN draw_event d ON d.event_id=e.id
-          WHERE e.kyoku_id=? AND e.event_order>? AND e.type IN
-          ('draw','discard','chi','pon','daiminkan','ankan','shominkan','ron','tsumo','ryukyoku')
-          ORDER BY e.event_order,e.id LIMIT 1""",(ky,anchor)).fetchone()
-        require(nxt is not None and int(nxt["id"])==n and nxt["type"]=="draw","actual successor event")
+          WHERE e.kyoku_id=? AND (e.event_order>? OR (e.event_order=? AND e.id>?)) AND e.type IN {action_types}
+          ORDER BY e.event_order,e.id LIMIT 1""",(ky,anchor,anchor,anchor_id)).fetchone()
+        require(nxt is not None and int(nxt["id"])==n and nxt["type"]=="draw","actual successor event: "+str((r["draw_event_id"],r["kan_event_id"],n,dict(nxt) if nxt else None)))
         require(int(nxt["event_order"])==int(r["terminal_or_next_order"]),"successor order")
         if r["link_reason"]=="kan_before_rinshan":
             k=c.execute("SELECT id,kyoku_id,event_order,type FROM event WHERE id=?",(int(r["kan_event_id"]),)).fetchone()
