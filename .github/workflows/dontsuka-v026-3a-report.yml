@@ -1,0 +1,25 @@
+name: ドンツカ総合研究 v0.26 第3工程A 報告書梱包
+on:
+  push:
+    branches: [codex/dontsuka-v026-base-20261128]
+    paths:
+      - 'research/dontsuka_v026_3a/report.md'
+permissions:
+  contents: read
+jobs:
+  archive-report:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify and package report records
+        run: |
+          cd research/dontsuka_v026_3a
+          test -s report.md
+          test -s 46085666669-drive-readback.json
+          sha256sum report.md *readback.json > SHA256SUMS
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dontsuka-v026-3a-report-${{ github.run_id }}-${{ github.run_attempt }}
+          path: research/dontsuka_v026_3a/
+          retention-days: 30
+          if-no-files-found: error
