@@ -1,0 +1,137 @@
+name: ドンツカ総合研究 v0.26 第5工程B
+on:
+  push:
+    branches: [codex/dontsuka-v026-base-20261128]
+    paths:
+      - '.github/workflows/dontsuka-v026-5b.yml'
+      - 'scripts/dontsuka_v026_5b*.py'
+      - 'scripts/dontsuka_v026_5b_prepare.sh'
+      - 'scripts/test_dontsuka_v026_5b.py'
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    outputs:
+      shards: ${{ steps.plan.outputs.shards }}
+      matrix: ${{ steps.plan.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install mahjong==1.4.0
+      - name: Artificial tests against exhaustive reference
+        shell: bash
+        run: |
+          set -o pipefail
+          mkdir -p results/5b-benchmark
+          python scripts/test_dontsuka_v026_5b.py 2>&1 | tee results/5b-benchmark/artificial_tests.txt
+      - name: Pinned readonly inputs
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash scripts/dontsuka_v026_5b_prepare.sh
+      - name: Limited benchmark
+        shell: bash
+        run: |
+          set -o pipefail
+          python -u scripts/dontsuka_v026_5b.py /tmp/mahjong-fixed.sqlite3 /tmp/approved2b.zip /tmp/approved3a.zip /tmp/approved4a.zip /tmp/approved5a.zip results/5b-benchmark/sample --shards 32 --shard 0 --limit-rounds 24 2>&1 | tee results/5b-benchmark/benchmark.log
+      - name: Choose shard count from measured performance
+        id: plan
+        run: |
+          python - <<'PY'
+          import json,math,os
+          from pathlib import Path
+          p=Path('results/5b-benchmark')
+          m=json.loads((p/'sample/manifest.json').read_text())
+          assert m['status']=='computed' and m['counts']['isshanten']>0
+          per=m['processing_seconds']/len(m['kyoku_ids'])
+          n=next((n for n in (16,32,64,128) if per*math.ceil(25238/n)*2+m['elapsed_seconds']<6000),None)
+          plan=dict(per_round_seconds=per,peak_rss_kib=m['peak_rss_kib'],shards=n,safety_factor=2,estimated_shard_seconds=None if n is None else per*math.ceil(25238/n)*2+m['elapsed_seconds'])
+          (p/'plan.json').write_text(json.dumps(plan,indent=2))
+          print(plan)
+          assert n is not None and m['peak_rss_kib']<5*1024*1024, 'benchmark exceeds supported limits; checkpoint retained'
+          with open(os.environ['GITHUB_OUTPUT'],'a') as f:
+              f.write('shards='+str(n)+'\n')
+              f.write('matrix='+json.dumps(list(range(n)))+'\n')
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: dontsuka-v026-5b-benchmark-${{ github.run_id }}
+          path: results/5b-benchmark/
+          if-no-files-found: warn
+          retention-days: 30
+  shards:
+    needs: benchmark
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      max-parallel: 16
+      matrix:
+        shard: ${{ fromJSON(needs.benchmark.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install mahjong==1.4.0
+      - name: Pinned readonly inputs
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash scripts/dontsuka_v026_5b_prepare.sh
+      - name: Full round shard
+        shell: bash
+        run: |
+          set -o pipefail
+          mkdir -p results/5b-shard
+          python -u scripts/dontsuka_v026_5b.py /tmp/mahjong-fixed.sqlite3 /tmp/approved2b.zip /tmp/approved3a.zip /tmp/approved4a.zip /tmp/approved5a.zip results/5b-shard --shards ${{ needs.benchmark.outputs.shards }} --shard ${{ matrix.shard }} 2>&1 | tee results/5b-shard/run.log
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: dontsuka-v026-5b-shard-${{ matrix.shard }}
+          path: results/5b-shard/
+          if-no-files-found: warn
+          retention-days: 30
+  merge:
+    needs: [benchmark,shards]
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install mahjong==1.4.0
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: dontsuka-v026-5b-shard-*
+          path: results/shards
+      - uses: actions/download-artifact@v4
+        with:
+          name: dontsuka-v026-5b-benchmark-${{ github.run_id }}
+          path: results/benchmark
+      - name: Independent merge
+        run: python -u scripts/dontsuka_v026_5b_merge.py results/shards results/final --shards ${{ needs.benchmark.outputs.shards }}
+      - name: Preserve final source and package hashes
+        run: |
+          mkdir -p results/source
+          cp scripts/dontsuka_v026_5b* scripts/test_dontsuka_v026_5b.py .github/workflows/dontsuka-v026-5b.yml results/source/
+          python - <<'PY'
+          import hashlib,json
+          from pathlib import Path
+          p=Path('results')
+          d={str(f.relative_to(p)):hashlib.file_digest(f.open('rb'),'sha256').hexdigest() for f in sorted(p.rglob('*')) if f.is_file()}
+          (p/'package_sha256.json').write_text(json.dumps(d,indent=2))
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: dontsuka-v026-5b-final-${{ github.run_id }}
+          path: results/
+          if-no-files-found: warn
+          retention-days: 30
