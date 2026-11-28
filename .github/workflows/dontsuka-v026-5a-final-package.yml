@@ -1,0 +1,129 @@
+name: ドンツカ v0.26 第5工程A 最終成果物
+on:
+  push:
+    branches: [codex/dontsuka-v026-base-20261128]
+    paths: ['.github/workflows/dontsuka-v026-5a-final-package.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Read immutable validated artifacts
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p results/final
+          gh api /repos/${{ github.repository }}/actions/artifacts/15256940222/zip > /tmp/latest.zip
+          gh api /repos/${{ github.repository }}/actions/artifacts/15256661560/zip > /tmp/evidence.zip
+          gh api /repos/${{ github.repository }}/actions/artifacts/15255997491/zip > /tmp/diagnosis.zip
+          gh api /repos/${{ github.repository }}/actions/artifacts/15237734448/zip > /tmp/2b.zip
+          echo '5d2885cc4e19fdd0bb18a37a587145f9ab8699ef70efd385964ff11511f4edff  /tmp/latest.zip' | sha256sum -c
+          echo 'd24b4886aa53d6703031b194d7efc14736ad2b5fa2a2b5e0b9f66180dc2e3240  /tmp/evidence.zip' | sha256sum -c
+          echo 'fffd82b4e43c8fb8884369bfc00d5ff282f0e2a293df8f0e9dfe8f2ea4c5e60f  /tmp/diagnosis.zip' | sha256sum -c
+          echo 'a81dd53043b557edbccd1dcc4ab0db798a6c71db68aebbd12532272e600a2781  /tmp/2b.zip' | sha256sum -c
+      - name: Final scope-limited verification and reporting
+        run: |
+          python - <<'PY'
+          import csv,io,gzip,json,zipfile,hashlib,os
+          from pathlib import Path
+          from collections import Counter,defaultdict
+          out=Path('results/final')
+          z=zipfile.ZipFile('/tmp/latest.zip'); e=zipfile.ZipFile('/tmp/evidence.zip'); d=zipfile.ZipFile('/tmp/diagnosis.zip'); b=zipfile.ZipFile('/tmp/2b.zip')
+          for f in (z,e,d,b):assert f.testzip() is None
+          m=json.loads(z.read('manifest.json')); comp=json.loads(z.read('comparison.json'))
+          for f,hashes in [(z,m['outputs']),(e,json.loads(e.read('sha256.json'))),(d,json.loads(d.read('sha256.json')))]: 
+              assert all(hashlib.sha256(f.read(n)).hexdigest()==h for n,h in hashes.items())
+          assert m['database']['release_id']=='20261120-2341-04338cbb' and m['draw_identity_match']
+          assert comp['outside_original_changed']==0 and comp['new_status']=={'evaluated':59,'unresolved':133}
+          assert m['errors']==133 and m['counts']['all_draws']==1257732 and m['counts']['basic_dontsuka']==27578
+          assert 'Ran 15 tests' in z.read('artificial_tests.txt').decode()
+          def read(f,n):return list(csv.DictReader(io.StringIO(f.read(n).decode('utf-8-sig'))))
+          def write(n,rows):
+              with (out/n).open('w',encoding='utf-8-sig',newline='') as f:
+                  w=csv.DictWriter(f,fieldnames=list(dict.fromkeys(k for r in rows for k in r)));w.writeheader();w.writerows(rows)
+          bad=read(z,'unresolved_and_discrepancies.csv'); old=read(z,'original_192_resolution.csv')
+          assert len(bad)==133 and len(old)==192 and sum(int(x['is_dontsuka']) for x in bad)==1
+          assert {x['draw_event_id'] for x in bad}=={x['draw_event_id'] for x in old if x['new_status']=='unresolved'}
+          rounds=json.loads(e.read('round_records.json')); names={str(x['id']):x['name'] for x in json.loads(e.read('players.json'))}
+          traces=json.loads(d.read('round_traces.json'))
+          byround=defaultdict(list)
+          for r in bad:byround[r['kyoku_id']].append(r)
+          assert set(byround)==set(rounds) and len(rounds)==11
+          finalrows=[]; rr=[]; reasons=Counter()
+          for ky,rs in sorted(byround.items(),key=lambda x:int(x[0])):
+              a=rs[0];p=int(a['player_id']);rec=rounds[ky]; fp=[x for x in rec['foul_play'] if x['actor_player_id']==p and not x['is_restarted']]
+              assert len(fp)==1 and all(int(r['player_id'])==p for r in rs)
+              f=fp[0]; reason=f['description'];reasons[reason]+=len(rs)
+              expected=14 if f['foul_type']=='多牌' else 12
+              trace=traces[ky]; ts={str(x['event']['id']):x for x in trace}
+              assert all(ts[r['draw_event_id']]['before_effective']==expected for r in rs)
+              assert not any(x['actor_player_id']==p for x in rec.get('agari_event',[]))
+              assert not any(x['player_id']==p for x in rec.get('player_tenpai_state',[]))
+              for r in rs:finalrows.append(dict(r,player_name=names[str(p)],foul_play_id=f['id'],foul_type=f['foul_type'],foul_description=reason,effective_tiles=expected,restoration='not_applicable_actual_foul',final_status='unresolved_special_actual_foul'))
+              rr.append(dict(kyoku_id=ky,game_date=a['game_date'],season_start_year=a['season_start_year'],stage=a['stage'],player_id=p,player_name=names[str(p)],foul_play_id=f['id'],foul_type=f['foul_type'],description=reason,unresolved=len(rs),basic_dontsuka=sum(int(r['is_dontsuka']) for r in rs),effective_tiles=expected,restarted=f['is_restarted'],affected_winner=False,affected_tenpai_records=0,restored=0))
+          assert reasons=={'親の第一ツモ忘れ':114,'多牌（配牌から2回ツモ）':14,'嶺上牌の引き忘れ':5}
+          write('remaining_133_final.csv',finalrows);write('remaining_11_rounds.csv',rr)
+          (out/'original_192_resolution.csv').write_bytes(z.read('original_192_resolution.csv'))
+          (out/'original_full_run_manifest.json').write_bytes(z.read('manifest.json'))
+          (out/'original_full_run_comparison.json').write_bytes(z.read('comparison.json'))
+          (out/'artificial_tests.txt').write_bytes(z.read('artificial_tests.txt'))
+          counts=defaultdict(Counter); allids=set(); unresolved=set()
+          def scopes(r):
+              p=r['player_id'];s=r['season_start_year'];t=r['stage']
+              for who in ('all',p):
+                  for season,stage in (('all','all'),(s,'all'),('all',t),(s,t)):
+                      yield (who,season,stage)
+          with gzip.GzipFile(fileobj=io.BytesIO(z.read('all_draw_coverage.csv.gz'))) as g:
+              for r in csv.DictReader(io.TextIOWrapper(g,encoding='utf-8')):
+                  eid=r['draw_event_id'];assert eid not in allids;allids.add(eid)
+                  assert r['status'] in ('evaluated','unresolved')
+                  u=r['status']=='unresolved'; dd=int(r['is_dontsuka'])
+                  if u:unresolved.add(eid);assert r['is_shoubute']==''
+                  for key in scopes(r):
+                      c=counts[key];c['draws']+=1;c['basic_dontsuka']+=dd;c['unresolved']+=u;c['unresolved_dontsuka']+=u*dd
+          assert len(allids)==1257732 and unresolved=={r['draw_event_id'] for r in bad}
+          agg=[]
+          for (p,s,t),c in sorted(counts.items()):
+              n=c['draws'];u=c['unresolved']
+              agg.append(dict(player_id=p,player_name='全選手' if p=='all' else names[p],season_start_year=s,stage=t,total_draws=n,evaluated_draws=n-u,unresolved_draws=u,coverage_pct=(n-u)/n*100,basic_dontsuka=c['basic_dontsuka'],unresolved_basic_dontsuka=c['unresolved_dontsuka']))
+          write('unresolved_by_player_period_stage.csv',agg)
+          overall=m['overall']; assert (overall['tenpai_draws'],overall['tenpai_dontsuka'],overall['shoubute_draws'],overall['shoubute_dontsuka'],overall['shoubute_dontsuka_kyoku'],overall['actual_ron_kyoku'],overall['self_wins'],overall['kyoku_net_sum'])==(161790,5696,97757,3449,3426,2676,365,-15207000)
+          rate=lambda a,b:a/b*100
+          metrics={k:{'numerator':a,'denominator':b,'value':rate(a,b),'unit':'percent'} for k,a,b in [('coverage',1257599,1257732),('basic_dontsuka_rate',27578,1257732),('tenpai_dontsuka_rate',5696,161790),('shoubute_tenpai_dontsuka_rate',3449,97757),('riichi_shoubute_dontsuka_rate',2045,64734),('damaten_shoubute_dontsuka_rate',673,14920),('open_shoubute_dontsuka_rate',731,18103),('actual_ron_kyoku_rate',2676,3426),('fulfillment_rate',365,3426)]}
+          metrics['mean_kyoku_net']={'numerator':-15207000,'denominator':3426,'value':-15207000/3426,'unit':'points'}
+          for name in ('immediate','subsequent','different_tile','no_ron','special_excluded'):
+              n=overall['ron_category_'+name];metrics['4a_kyoku_category_'+name]={'numerator':n,'denominator':3426,'value':rate(n,3426),'unit':'percent'}
+          write('metric_numerators_denominators.csv',[dict(metric=k,**v) for k,v in metrics.items()])
+          missing_d=next(r for r in bad if r['is_dontsuka']=='1'); ky=missing_d['kyoku_id'];p=missing_d['player_id']
+          oldk=read(z,'shoubute_dontsuka_kyoku.csv')
+          already=any(r['kyoku_id']==ky and r['player_id']==p for r in oldk)
+          sr=next(r for r in read(b,'kyoku_comparison.csv') if r['kyoku_id']==ky)
+          def scoremap(s):return {str(k):v for k,v in json.loads(s).items()}
+          net=scoremap(sr['recorded_end_scores'])[p]-scoremap(sr['start_scores'])[p]
+          impact={'actual_changes':0,'unresolved_draws':133,'unresolved_basic_dontsuka':1,'non_dontsuka_unresolved':132,'counterfactual_arithmetic_only':True,'shoubute_rate_min_pct':rate(3449,97757+132),'shoubute_rate_max_pct':rate(3450,97757+1),'tenpai_rate_min_pct':rate(5696,161790+132),'tenpai_rate_max_pct':rate(5697,161790+1),'possible_additional_player_round_max':int(not already),'unresolved_dontsuka':{'draw_event_id':missing_d['draw_event_id'],'kyoku_id':ky,'player_id':p,'name':names[p],'already_qualifying_round':already,'actual_ron':False,'self_win':False,'actual_round_net':net},'note':'Arithmetic sensitivity only, not a possible legal restoration or an imputation. Actual foul records establish that missing normal draws did not occur.'}
+          report=['# ドンツカ総合研究v0.26 第5工程A 最終報告書（2026-11-28）','',
+          '## 1. 最終確認の結論','固定版DB 20261120-2341-04338cbb。全件処理終了、人工テスト15/15成功、旧192件の59件解消、対象外変更0件。残存133件は実対局の少牌・多牌に対応する特殊事例。通常のツモが欠落・重複したとする前回の説明を訂正する。foul_play の当該選手・局・反則内容と再構成手牌枚数が全11局で一致した。正常なツモの追加・削除は事実の改変となるため行わない。復元0件、集計値変更0件。非テンパイ・非勝負手への置換なし。研究責任者の採用・承認は別途。','',
+          '## 2. 原因別及び局別明細','|原因|件数|','|---|---:|']+[f'|{k}|{v}|' for k,v in reasons.items()]+['','|局ID|選手|日付|シーズン開始年|ステージ|件数|ドンツカ|反則記録ID|','|---|---|---|---|---|---:|---:|---:|']+[f"|{r['kyoku_id']}|{r['player_name']}|{r['game_date']}|{r['season_start_year']}|{r['stage']}|{r['unresolved']}|{r['basic_dontsuka']}|{r['foul_play_id']}|" for r in rr]+['',
+          '配牌・打牌（手出し/ツモ切り）・副露・手牌状態・テンパイ状態・和了記録・局結果及び反則記録を照合。対象選手の和了とテンパイ記録はいずれも0。DBには独立した和了時手牌列及び流局時手牌列が存在せず、牌譜再構成と既存記録を使用。通常の手牌復元を妨げるのはデータ欠落ではなく実際の特殊進行である。実装が正常手牌のみを評価するため終了コード1となったが、全ツモIDの処理と比較出力は完了。観測・適用上の制約として保持し、実装上の未解消バグとは区別。','',
+          '## 3. 全件集計と分子・分母','総ツモ1,257,732、判定可能1,257,599、判定不能133、判定可能割合99.989425410%。基本ドンツカ27,578、判定不能中1件。','|指標|分子|分母|値|','|---|---:|---:|---:|']+[f"|{k}|{v['numerator']}|{v['denominator']}|{v['value']:.9f} {'%' if v['unit']=='percent' else '点'}|" for k,v in metrics.items()]+['',
+          '局単位の放銃分類は承認4Aの選手局属性を保持し、勝負手起点からの因果的放銃と同一視しない。3件の物理的和了候補なしは旧修正版の独立分類を維持し、テンパイ分母に算入しない。','',
+          '## 4. 影響範囲','133件のうち基本ドンツカ1件（局23004、内川幸太郎、イベント2510917）。残る132件は基本ドンツカなし。通常手牌の復元を仮定しないため実際の変更は0件。数学的感度のみとして、仮に未判定の非ドンツカ132件を勝負手分母に全件算入した場合の下限は3.523378521%、ドンツカ1件のみを分子・分母に算入した場合の上限は3.529122936%。これは補完値でも合法的な復元可能性でもない。発生選手局の追加上限は1、実際の局結果は別記。','',
+          '## 5. 成果物・保存','最新全件ZIPはDrive https://drive.google.com/file/d/18oCMNQCYUtKSh0rw5XzSctOwo_GyDafe/view に保存済み。追加記録ZIPは https://drive.google.com/file/d/1oKbl-6YJWFAxbygWKDmoKJIFBuBqa9_P/view に保存済み。本最終パッケージには192件比較、133件最終明細、11局別明細、全選手・期間・ステージ別の判定不能集計、分子分母、最終Manifest、人工テスト、元Manifestを収録。ZIP外部ハッシュ・Drive再取得結果は保存後の別記録とする。旧成果物は変更しない。','',
+          '## 6. 停止範囲','第5工程Aのみ。原典v0.26、正本DB、既存指標、承認済み工程及び旧成果物の変更なし。勝負手一向聴及び第5工程B以降未着手。最終確認報告は採用・承認ではない。']
+          (out/'final_report.md').write_text('\n'.join(report)+'\n',encoding='utf-8')
+          final=dict(scope='5A only',status='final_verification_completed_pending_research_owner_approval',release=m['database']['release_id'],database_sha256=m['database_sha256'],source_run=m['run_id'],source_commit=m['commit'],original_workflow_conclusion='failure_due_to_133_unresolved',original_counts=m['counts'],overall=overall,coverage={'total':1257732,'evaluated':1257599,'unresolved':133,'evaluated_pct':rate(1257599,1257732),'unresolved_basic_dontsuka':1},original_192={'resolved':59,'remaining':133,'outside_changed':0},foul_reason_counts=dict(reasons),rounds=rr,restored=0,metrics=metrics,impact=impact,artificial_tests={'passed':15,'total':15},source_artifact_sha256={'latest':'5d2885cc4e19fdd0bb18a37a587145f9ab8699ef70efd385964ff11511f4edff','evidence':'d24b4886aa53d6703031b194d7efc14736ad2b5fa2a2b9f66180dc2e3240','diagnosis':'fffd82b4e43c8fb8884369bfc00d5ff282f0e2a293df8f0e9dfe8f2ea4c5e60f'},definitions_unchanged=True,approved_inputs_unchanged=True,next_stage_started=False,outputs={p.name:hashlib.file_digest(p.open('rb'),'sha256').hexdigest() for p in out.iterdir()})
+          (out/'final_manifest.json').write_text(json.dumps(final,ensure_ascii=False,indent=2)+'\n',encoding='utf-8')
+          print(json.dumps(dict(coverage=final['coverage'],reasons=dict(reasons),impact=impact,files=list(final['outputs'])),ensure_ascii=False))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dontsuka-v026-5a-final-package-${{ github.run_id }}
+          path: results/final/
+          if-no-files-found: error
+          retention-days: 30
