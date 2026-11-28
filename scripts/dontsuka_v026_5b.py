@@ -69,7 +69,7 @@ def main():
     dbids={int(r[0]) for r in c.execute("SELECT d.event_id,e.kyoku_id FROM draw_event d JOIN event e ON e.id=d.event_id") if int(r[1]) in selected}
     require(set(expected)==dbids,"A vs DB IDs")
     fields=["draw_event_id","event_order","kyoku_id","game_id","game_date","season_start_year","stage","player_id","status","physical_shanten","is_dontsuka","is_shoubute","progressions","patterns","qualifying_progressions","qualifying_patterns","concealed_before","melds","omote","past_discards","witness","opponents","actual_ron_links","error"]
-    seen=set();counts=Counter();rounds={};errors=[];examples={}
+    seen=set();counts=Counter();rounds={};errors=[];examples={};fouls=[];processing_start=time.monotonic()
     with gzip.open(a.out/"coverage.csv.gz","wt",encoding="utf-8",newline="") as cf,gzip.open(a.out/"isshanten_draws.csv.gz","wt",encoding="utf-8",newline="") as qf,gzip.open(a.out/"shoubute_dontsuka.csv.gz","wt",encoding="utf-8",newline="") as df:
         cw=csv.DictWriter(cf,fieldnames=fields[:12],extrasaction="ignore")
         qw=csv.DictWriter(qf,fieldnames=fields,extrasaction="ignore")
@@ -95,6 +95,8 @@ def main():
                             require(before["status"]=="unresolved","A exclusion status")
                             r.update(status="not_applicable_actual_foul",is_shoubute="")
                             counts.update(excluded=1,excluded_basic=dd)
+                            effective=len(h)+3*len(m)
+                            fouls.append(dict(excluded[eid],effective_tiles=effective,reason="少牌" if effective<13 else "多牌",final_status="not_applicable_actual_foul"))
                         else:
                             q=sh(vector(h));r["physical_shanten"]=q
                             require(before["status"]=="evaluated" and q==int(before["physical_shanten"]),"A shanten mismatch")
@@ -126,10 +128,10 @@ def main():
     for (ky,p),ids in sorted(rounds.items()):
         e=end[ky];delta=scoremap(e["recorded_end_scores"])[p]-scoremap(e["start_scores"])[p]
         rows.append(dict(kyoku_id=ky,player_id=p,**meta[ky],draw_count=len(ids),draw_event_ids=js(ids),also_shoubute_tenpai_dontsuka=int((ky,p) in a_rounds),actual_ron=int(bool(actual[ky,p])),approved_ron_classification=old[ky,p]["category"],actual_ron_event_ids=js([r["ron_event_id"] for r in actual[ky,p]]),self_win=int(p in winners[ky]),kyoku_net=delta))
-    write_json(a.out/"rounds.json",rows);write_json(a.out/"errors.json",errors)
+    write_json(a.out/"rounds.json",rows);write_json(a.out/"errors.json",errors);write_json(a.out/"exclusions.json",fouls)
     write_json(a.out/"real_examples.json",examples)
     write_json(a.out/"names.json",names)
-    manifest=dict(scope="5B only",status="incomplete" if errors else "computed",shard=a.shard,shards=a.shards,limited=bool(a.limit_rounds),kyoku_ids=kys,counts=dict(counts),errors=len(errors),elapsed_seconds=time.monotonic()-start,peak_rss_kib=resource.getrusage(resource.RUSAGE_SELF).ru_maxrss,scoring_cache=str(scoring.cache_info()),structural_cache=str(structural_options.cache_info()),database_sha256=DB_SHA,stage5a_sha256=A_SHA,commit=os.getenv("GITHUB_SHA"),run_id=os.getenv("GITHUB_RUN_ID"))
+    manifest=dict(scope="5B only",status="incomplete" if errors else "computed",shard=a.shard,shards=a.shards,limited=bool(a.limit_rounds),kyoku_ids=kys,counts=dict(counts),errors=len(errors),elapsed_seconds=time.monotonic()-start,processing_seconds=time.monotonic()-processing_start,peak_rss_kib=resource.getrusage(resource.RUSAGE_SELF).ru_maxrss,scoring_cache=str(scoring.cache_info()),structural_cache=str(structural_options.cache_info()),database_sha256=DB_SHA,stage5a_sha256=A_SHA,commit=os.getenv("GITHUB_SHA"),run_id=os.getenv("GITHUB_RUN_ID"))
     manifest["outputs"]={f.name:sha256_file(f) for f in a.out.iterdir() if f.is_file() and f.name!="manifest.json"}
     write_json(a.out/"manifest.json",manifest);print(js({k:v for k,v in manifest.items() if k!="kyoku_ids"}),flush=True)
     if errors:raise SystemExit(1)
