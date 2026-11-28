@@ -1,0 +1,65 @@
+name: ドンツカ総合研究 v0.26 第3工程A 差異診断
+on:
+  push:
+    branches: [codex/dontsuka-v026-base-20261128]
+    paths:
+      - '.github/workflows/dontsuka-v026-3a-diagnostic.yml'
+      - 'scripts/dontsuka_v026_3a_diagnostic.py'
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Prepare
+        run: |
+          mkdir -p results/dontsuka_v026_3a_diagnostic
+          pip install mahjong==1.4.0
+      - name: Retrieve fixed DB and preserved first result
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh api /repos/${{ github.repository }}/actions/artifacts/15239450349/zip > /tmp/source3a.zip
+          echo 'da593920add867904fc82f8f51207a6fe318fa42a2945e1880c5653112fe4ce1  /tmp/source3a.zip' | sha256sum --check
+          curl --fail --location --retry 3 https://github.com/konoui/m-league-game-db/releases/download/20261120-2341-04338cbb/database.zip -o /tmp/mahjong-database.zip
+          echo 'e2e702402301ae136da71e3f79113f929e291779ff4997c24db5262aaa4ff548  /tmp/mahjong-database.zip' | sha256sum --check
+          python - <<'PY'
+          import shutil,zipfile
+          from pathlib import Path
+          with zipfile.ZipFile('/tmp/mahjong-database.zip') as z:
+              cs=[x for x in z.infolist() if not x.is_dir() and Path(x.filename).suffix.lower() in {'.sqlite3','.sqlite','.db','.db3'}]
+              assert len(cs)==1 and cs[0].file_size==873754624
+              with z.open(cs[0]) as src,open('/tmp/mahjong-fixed.sqlite3','wb') as dst:shutil.copyfileobj(src,dst)
+          PY
+          echo 'edeccd86e100f6ffba88871d7c418a06488d3f515b22cdd2e2b9dced17573e6c  /tmp/mahjong-fixed.sqlite3' | sha256sum --check
+      - name: Compare snapshot yaku with independent replay
+        run: |
+          set -o pipefail
+          python -u scripts/dontsuka_v026_3a_diagnostic.py /tmp/mahjong-fixed.sqlite3 /tmp/source3a.zip results/dontsuka_v026_3a_diagnostic 2>&1 | tee results/dontsuka_v026_3a_diagnostic/audit.log
+      - name: Finalize manifest
+        if: always()
+        run: |
+          python - <<'PY'
+          import hashlib,json,os
+          from pathlib import Path
+          out=Path('results/dontsuka_v026_3a_diagnostic');out.mkdir(parents=True,exist_ok=True)
+          p=out/'manifest.json';m=json.loads(p.read_text()) if p.exists() else {'scope':'3A diagnostic only','status':'incomplete'}
+          m['commit']=os.environ['GITHUB_SHA'];m['run_id']=os.environ['GITHUB_RUN_ID'];m['run_attempt']=os.environ['GITHUB_RUN_ATTEMPT']
+          m['outputs']={f.name:hashlib.file_digest(f.open('rb'),'sha256').hexdigest() for f in sorted(out.iterdir()) if f.is_file() and f!=p}
+          p.write_text(json.dumps(m,ensure_ascii=False,indent=2)+'\n',encoding='utf-8')
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: dontsuka-v026-3a-diagnostic-${{ github.run_id }}-${{ github.run_attempt }}
+          path: results/dontsuka_v026_3a_diagnostic/
+          retention-days: 30
+          if-no-files-found: error
