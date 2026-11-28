@@ -20,7 +20,7 @@ jobs:
           python-version: '3.12'
       - name: 20261128正本固定版を取得し整合性を検証
         run: |
-          python - <<'PY'
+          PYTHONPATH=scripts python - <<'PY'
           import json, sqlite3, tempfile
           from pathlib import Path
           from scripts.export_weekly_delta_20261128 import source_release
