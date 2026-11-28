@@ -33,11 +33,11 @@ class Tests(unittest.TestCase):
         f=Fixture();a=f.r.active[1];b=f.r.active[2]
         self.assertNotEqual(a.start_event_id,b.start_event_id)
         self.assertEqual(relation(a,b),"simultaneous")
-        d=f.draw(1,"9p",(2,));p=f.pair(d,2)
+        d=f.draw(1,"6p",(2,));p=f.pair(d,2)
         self.assertEqual(p["relation"],"simultaneous")
         self.assertEqual(p["combination"],"")
         self.assertEqual(d["interval_draw_number"],1)
-        f.discard(1,"9p");f.close()
+        f.discard(1,"6p");f.close()
     def test_reach_independent_and_chase(self):
         h2=H2[:-1]+["1m"];f=Fixture(H1,h2)
         self.assertEqual(state(f.r.replay,2)[0],"not_tenpai")
@@ -49,13 +49,13 @@ class Tests(unittest.TestCase):
         self.assertEqual(f.pair(d,2)["relation"],"self_earlier")
         self.assertEqual(f.pair(d,2)["combination"],"self_earlier:damaten:riichi")
         f.reach(1,"9p");self.assertEqual(f.r.active[1].key,a)
-        d=f.draw(2,"1p",(1,));p=f.pair(d,1)
+        d=f.draw(2,"6m",(1,));p=f.pair(d,1)
         self.assertEqual(p["relation"],"self_later")
         self.assertEqual(p["first_reach_class"],"chase_riichi")
         self.assertEqual(p["combination"],"self_later:riichi:riichi")
         self.assertEqual(p["target_info"]["interval_id"],a)
         self.assertEqual(p["self_info"]["interval_id"],b.key)
-        f.discard(2,"1p");f.close()
+        f.discard(2,"6m");f.close()
     def test_first_reach_earlier_tenpai(self):
         f=Fixture(H1,H2[:-1]+["1m"])
         a=f.r.active[1].key
@@ -69,12 +69,12 @@ class Tests(unittest.TestCase):
         f.discard(1,"6p");f.close()
     def test_prior_damaten(self):
         f=Fixture();f.draw(1,"9p");f.reach(1,"9p")
-        d=f.draw(1,"6p");p=f.pair(d,2)
+        d=f.draw(1,"7z");p=f.pair(d,2)
         self.assertEqual(p["first_reach_class"],"prior_damaten")
         self.assertEqual(p["target_at_first_reach"]["state"],"damaten")
         self.assertEqual(p["is_opponent_dontsuka"],0)
         self.assertIn("prior_damaten",conditions(p))
-        f.discard(1,"6p");f.close()
+        f.discard(1,"7z");f.close()
     def test_temporary_fourteen_and_wait_change(self):
         f=Fixture();a=f.r.active[1]
         f.draw(1,"6m")
@@ -111,14 +111,14 @@ class Tests(unittest.TestCase):
         f.discard(2,"9m");f.close()
     def test_kan(self):
         h="1m 1m 1m 1p 2p 3p 1s 2s 3s 1z 1z 4m 5m".split()
-        f=Fixture(h);a=f.r.active[1]
+        f=Fixture(h,H2,["6z" if t=="1m" else t for t in H3],["7z" if t=="1m" else t for t in H4]);a=f.r.active[1]
         f.draw(1,"1m");f.e("ankan",1,tile="1m",block="1m1m1m1m")
         self.assertIs(f.r.active[1],a)
         d=f.e("draw",1,tile="9p",rinshan=True)
         self.assertEqual(d["interval_draw_number"],2)
         f.discard(1,"9p");f.close()
         h="3m 4m 5m 4m 5m 6m 5m 6m 7m 1p 2p 5z 5z".split()
-        f=Fixture(h);a=f.r.active[1]
+        f=Fixture(h,H2,H3,["7z" if t=="5m" else t for t in H4]);a=f.r.active[1]
         f.draw(1,"5m");f.e("ankan",1,tile="5m",block="5m5m5m5m")
         self.assertNotIn(1,f.r.active);self.assertEqual(a.end_reason,"tenpai_broken")
         f.close()
@@ -130,9 +130,14 @@ class Tests(unittest.TestCase):
         self.assertTrue(all(not x["self_first_reach"] for x in d["pairs"]))
         f.close()
     def test_first_hits_multiple_no_hit_and_zero(self):
-        f=Fixture();a=f.r.active[1]
+        h3="4m 5m 6m 4s 5s 6s 2m 3m 4m 5m 5m 4p 5p".split()
+        h4="2m 3m 4m 2s 3s 4s 6m 7m 8m 6s 6s 4p 7z".split()
+        f=Fixture(H1,H2,h3,h4);a=f.r.active[1]
         d=f.draw(1,"9p");self.assertEqual(d["first_hit"],0);f.discard(1,"9p")
         d=f.draw(1,"3p",(2,3));self.assertEqual((d["first_hit"],d["interval_draw_number"],d["opponent_count"]),(1,2,2));f.discard(1,"3p")
+        f.draw(2,"9s");f.discard(2,"9s")
+        f.draw(3,"8s");f.discard(3,"8s")
+        f.draw(4,"5p");f.discard(4,"7z")
         d=f.draw(1,"3p",(2,3,4));self.assertEqual((d["first_hit"],d["opponent_count"]),(0,3))
         self.assertEqual([p["target_id"] for p in d["pairs"] if p["first_target_hit"]],[4])
         f.discard(1,"3p");rr=f.close()
@@ -157,6 +162,36 @@ class Tests(unittest.TestCase):
         f.discard(1,"9p");f.close()
         f=Fixture(H1+["9p"]);d=f.draw(1,"9p")
         self.assertEqual(d["self_info"]["state"],"unknown");f.close()
+    def test_all_18_combinations_physical(self):
+        for earlier,later in product(sorted(TENPAI),repeat=2):
+            for first in (1,2):
+                second=3-first
+                types={first:earlier,second:later}
+                hands={1:H1,2:H2}
+                missing={1:"5m",2:"5p"};extra={1:"9m",2:"1m"}
+                if earlier=="open":hands[first]=hands[first][:-1]+[extra[first]]
+                hands[second]=hands[second][:-1]+[extra[second]]
+                f=Fixture(hands[1],hands[2])
+                for p in (first,second):
+                    typ=types[p]
+                    if typ=="open":
+                        z=f"{p}z";f.draw(3,z);f.discard(3,z)
+                        f.e("pon",p,target=3,tile=z,block=z*3)
+                        f.discard(p,"4m" if p==1 else "4p")
+                    elif p==second:
+                        f.draw(p,missing[p])
+                        if typ=="riichi":f.reach(p,extra[p])
+                        else:f.discard(p,extra[p])
+                    elif typ=="riichi":
+                        f.draw(p,"5z");f.reach(p,"5z")
+                    self.assertEqual(state(f.r.replay,p)[0],typ,(earlier,later,first,p))
+                self.assertEqual(relation(f.r.active[first],f.r.active[second]),"self_earlier")
+                for p,rel in ((first,"self_earlier"),(second,"self_later")):
+                    d=f.draw(p,"6z" if p==1 else "7z")
+                    q=f.pair(d,3-p)
+                    self.assertEqual(q["combination"],f"{rel}:{types[p]}:{types[3-p]}")
+                    f.discard(p,"6z" if p==1 else "7z")
+                f.close()
     def test_all_18_combinations_logic(self):
         # All enum combinations; event-sequence coverage is separate above.
         for a,b in product(TENPAI,repeat=2):
