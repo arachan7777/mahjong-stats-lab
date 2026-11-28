@@ -1,0 +1,44 @@
+name: Mリーグ週次差分抽出 2026-11-20〜11-27
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'weekly-delta-run-20261128.txt'
+
+permissions:
+  contents: read
+
+jobs:
+  weekly-delta:
+    name: 固定版以降16試合・関連牌譜を抽出
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: リポジトリ取得
+        uses: actions/checkout@v4
+      - name: Python準備
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: 固定リリースの差分抽出と独立検査
+        run: |
+          python scripts/export_weekly_delta_20261128.py \
+            --release-tag 20261128-0102-1b6bd367 \
+            --after 2026-11-20 \
+            --through 2026-11-27 \
+            --expected-games 16 \
+            --expected-kyoku 199 \
+            --expected-events 21973 \
+            --output weekly-delta-out
+      - name: 検証済み差分と台帳の保存
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mahjong-weekly-delta-20261120-to-20261127
+          path: |
+            weekly-delta-out/mahjong-delta-after-2026-11-20-through-2026-11-27.zip
+            weekly-delta-out/manifest.json
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 7
