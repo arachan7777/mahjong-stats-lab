@@ -183,7 +183,7 @@ class RoundTracker:
         k, p = e["type"], e.get("actor")
         hits = set(hits)
         if self.finished:
-            require(k in TERMINAL, "event after terminal")
+            require(k in TERMINAL or k == "dora_indicator", "hand-changing event after terminal")
             return None
         self.last = e
         if k in TERMINAL:
