@@ -1,0 +1,70 @@
+name: キルクール七対子比較 20261128
+on:
+  push:
+    paths:
+      - '.github/workflows/kirucool-chiitoi-20261128.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: 固定版で七対子和了集計
+        run: |
+          PYTHONPATH=scripts python -u - <<'PY'
+          import sqlite3,json
+          from pathlib import Path
+          from scripts.export_weekly_delta_20261128 import source_release,hash_file
+          from scripts.check_latest_db import download_asset,extract_sqlite
+          tag='20261128-0102-1b6bd367'
+          release,asset=source_release(tag)
+          assert release['tag_name']==tag
+          z=Path('source.zip');db=Path('canonical.sqlite3')
+          sha=download_asset(asset['browser_download_url'],asset['size'],z)
+          assert not asset.get('digest') or asset['digest']=='sha256:'+sha
+          extract_sqlite(z,db)
+          assert hash_file(db)=='105445b19f7ab829457b47dea49f24b97bc265eaf8aabb987da2379ba7f5c8cf'
+          c=sqlite3.connect(db.resolve().as_uri()+'?mode=ro',uri=True)
+          c.row_factory=sqlite3.Row
+          assert c.execute('PRAGMA quick_check').fetchone()[0]=='ok'
+          counts={t:c.execute('SELECT COUNT(*) FROM '+t).fetchone()[0] for t in ('game','kyoku','event')}
+          assert counts=={'game':2084,'kyoku':25437,'event':2779703},counts
+          assert c.execute('SELECT MAX(date) FROM game').fetchone()[0]=='2026-11-27'
+          targets=[dict(x) for x in c.execute("SELECT id,name FROM yaku_name WHERE name LIKE '%七対%' OR name LIKE '%七對%'")]
+          print('YAKU_NAMES',targets,flush=True)
+          assert len(targets)==1,targets
+          name=targets[0]['name']
+          sql=Path('sql/yaku_agari_composition_v01.sql').read_text()
+          assert sql.count("SELECT '三色同順' AS name")==1
+          sql=sql.replace("SELECT '三色同順' AS name","SELECT '"+name+"' AS name")
+          wins={r['player_id']:dict(r) for r in c.execute(sql) if r['scope']=='all'}
+          q="""SELECT p.id player_id,p.name,COUNT(*) kyoku_count
+          FROM kyoku_player_result k JOIN player p ON p.id=k.player_id
+          GROUP BY p.id,p.name"""
+          rows=[]
+          for x in c.execute(q):
+              d=dict(x);w=wins[d['player_id']]
+              assert w['player_name']==d['name']
+              assert w['target_yaku_open_count']==0
+              d.update(wins=w['agari_count'],chiitoi=w['target_yaku_agari_count'])
+              rows.append(d)
+          assert len(rows)==len(wins)==56
+          assert sum(x['kyoku_count'] for x in rows)==25437*4
+          assert sum(x['wins'] for x in rows)==c.execute('SELECT COUNT(*) FROM agari_event').fetchone()[0]
+          assert sum(x['chiitoi'] for x in rows)==c.execute('SELECT COUNT(DISTINCT agari_event_id) FROM agari_yaku WHERE yaku_name_id=?',(targets[0]['id'],)).fetchone()[0]
+          result={'tag':tag,'counts':counts,'yaku':name,'players':rows}
+          Path('results').mkdir(exist_ok=True)
+          Path('results/chiitoi.json').write_text(json.dumps(result,ensure_ascii=False,indent=2))
+          print('CHIITOI_RESULT',json.dumps(result,ensure_ascii=False),flush=True)
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: kirucool-chiitoi-20261128
+          path: results/
+          if-no-files-found: error
