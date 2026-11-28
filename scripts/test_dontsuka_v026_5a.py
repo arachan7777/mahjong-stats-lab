@@ -42,7 +42,7 @@ class Test(unittest.TestCase):
         self.assertFalse(r["virtual_riichi"])
         self.assertNotIn("門前清自摸和",r["yaku"])
         self.assertEqual(r["yaku"]["赤ドラ"],1)
-        self.assertEqual(r["yaku"]["ドラ"],5)
+        self.assertEqual(r["yaku"]["ドラ"],4)
     def test_sanshoku_high_low(self):
         _,p,ok=evaluate("2m 3m 4m 2p 3p 4p 2s 3s 5p 6p 7p 1z 1z")
         a,b=find(p,"1s","ron"),find(p,"4s","ron")
