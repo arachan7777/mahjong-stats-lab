@@ -1,0 +1,52 @@
+name: ドンツカ総合研究 v0.26 第6工程差異限定検証
+on:
+  push:
+    branches: [codex/dontsuka-v026-base-20261128]
+    paths:
+      - '.github/workflows/dontsuka-v026-6-diagnostic.yml'
+      - 'research/dontsuka_v026_6/verify_wait_discrepancies.py'
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install mahjong==1.4.0
+      - name: Retrieve pinned DB and original stage 6 package
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          bash scripts/dontsuka_v026_5b_prepare.sh
+          gh api "/repos/$GITHUB_REPOSITORY/actions/artifacts/15259461689/zip" > /tmp/stage6.zip
+          echo 'baf795d5eb101a868113745030ea2c857f37da58e225bbc1b2fd555b58cc90a2  /tmp/stage6.zip' | sha256sum -c
+      - name: Verify affected seven rounds only
+        shell: bash
+        run: |
+          set -o pipefail
+          mkdir -p results/diagnostic
+          python -u research/dontsuka_v026_6/verify_wait_discrepancies.py /tmp/mahjong-fixed.sqlite3 /tmp/stage6.zip results/diagnostic 2>&1 | tee results/diagnostic/run.log
+      - name: Finalize hashes after logs close
+        if: always()
+        run: |
+          mkdir -p results/diagnostic
+          cp research/dontsuka_v026_6/verify_wait_discrepancies.py .github/workflows/dontsuka-v026-6-diagnostic.yml results/diagnostic/
+          python - <<'PY'
+          import hashlib,json
+          from pathlib import Path
+          p=Path('results/diagnostic')
+          d={f.name:hashlib.file_digest(f.open('rb'),'sha256').hexdigest() for f in p.iterdir() if f.is_file() and f.name!='manifest.json'}
+          (p/'manifest.json').write_text(json.dumps(d,indent=2))
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: dontsuka-v026-6-diagnostic-${{ github.run_id }}
+          path: results/diagnostic/
+          retention-days: 30
