@@ -13,7 +13,7 @@ from dontsuka_v026_7_core import Inventory,History,Linker,hand_state,movement,di
 SIX_SHA="baf795d5eb101a868113745030ea2c857f37da58e225bbc1b2fd555b58cc90a2"
 FOUR_B_SHA="bae9d9363246c7b77a809ad36538a5a6616a08fc8fbdd9badfb1503ec25c64d8"
 BASE="draw_event_id event_order kyoku_id game_id game_date season_start_year stage player_id draw_tile rinshan is_dontsuka opponent_count pre_shanten pre_state pre_effective pre_reason after_draw_shanten after_draw_effective after_draw_reason after_draw_hand after_draw_melds".split()
-LINK="discard_event_id discard_order discard_tile discard_tile_type tsumogiri discard_kind declaration accepted_before accepted_after target_reach_count post_shanten post_state post_effective post_reason shanten_delta movement movement_reason has_discard link_reason terminal_or_next_event_id terminal_or_next_order kan_event_id kan_kind kan_order".split()
+LINK="discard_event_id discard_order discard_tile discard_tile_type tsumogiri discard_kind declaration accepted_before accepted_marker_before accepted_after target_reach_count post_shanten post_state post_effective post_reason shanten_delta movement movement_reason has_discard link_reason terminal_or_next_event_id terminal_or_next_order kan_event_id kan_kind kan_order".split()
 PAIR="target_id is_opponent_dontsuka target_accepted_before target_reach_declaration_id genbutsu genbutsu_reason evidence_event_id evidence_order evidence_player_id".split()
 FIELDS=BASE+LINK
 def writer(f,fields):
@@ -125,7 +125,7 @@ def main():
                 facts={}
                 if k=="discard":
                     tsum=flags[eid];accepted=p in hist.established
-                    sources[eid]=dict(player_id=p,kind=k,tile=e["tile"],tsumogiri=tsum,declaration=int(bool(e["declaration"])),accepted_before=int(accepted))
+                    sources[eid]=dict(player_id=p,kind=k,tile=e["tile"],tsumogiri=tsum,declaration=int(bool(e["declaration"])),accepted_before=int(accepted),accepted_marker_before=int(p in rp.reaches))
                     for old,reason,_ in resolved:
                         if reason!="discard":continue
                         oldid=old["id"];rr,_=pending[oldid]
@@ -133,7 +133,7 @@ def main():
                         seen_discards.add(eid);discard_map[eid]=oldid
                         if tsum:require(old["tile"]==e["tile"],"4A tsumogiri physical draw")
                         if accepted:require(tsum,"accepted riichi non-tsumogiri")
-                        rr.update(discard_event_id=eid,discard_order=e["event_order"],discard_tile=e["tile"],discard_tile_type=normal(e["tile"]),tsumogiri=tsum,discard_kind=disposition(e,tsum,accepted),declaration=int(bool(e["declaration"])),accepted_before=int(accepted),target_reach_count=sum(t in hist.established for t in origins.get(oldid,{})),has_discard=1,link_reason="discard")
+                        rr.update(discard_event_id=eid,discard_order=e["event_order"],discard_tile=e["tile"],discard_tile_type=normal(e["tile"]),tsumogiri=tsum,discard_kind=disposition(e,tsum,accepted),declaration=int(bool(e["declaration"])),accepted_before=int(accepted),accepted_marker_before=int(p in rp.reaches),target_reach_count=sum(t in hist.established for t in origins.get(oldid,{})),has_discard=1,link_reason="discard")
                         facts[oldid]={}
                         for t in origins.get(oldid,{}):
                             gen,why,ev_id,order,actor=hist.genbutsu(t,e)
@@ -171,7 +171,7 @@ def main():
                     rr=ron_by_id[eid];src=sources[int(rr["source_event_id"])]
                     require((str(src["player_id"]),src["kind"],src["tile"],str(src["tsumogiri"]))==(rr["player_id"],rr["source_kind"],rr["tile"],rr["tsumogiri"]),"4A source")
                     sourceid=int(rr["source_event_id"]);dec=decision_by_source.get(sourceid)
-                    if dec and src["kind"]=="discard":require(str(src["accepted_before"])==dec["accepted_before"] and str(src["declaration"])==dec["declaration"],"4B discard flags")
+                    if dec and src["kind"]=="discard":require(str(src["accepted_marker_before"])==dec["accepted_before"] and str(src["declaration"])==dec["declaration"],"4B discard flags")
                     if rr["category"]=="immediate":require(discard_map.get(sourceid) in immediate,"4A immediate draw")
                     rw.writerow(dict(rr,**{k:src[k] for k in ("declaration","accepted_before")},linked_draw_id=discard_map.get(sourceid,""),immediate_origin_rows=len(immediate.get(discard_map.get(sourceid),[]))))
                     counts["4a_ron"]+=1
