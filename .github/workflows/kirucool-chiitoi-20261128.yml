@@ -23,11 +23,9 @@ jobs:
           from scripts.export_weekly_delta_20261128 import source_release,hash_file
           from scripts.check_latest_db import download_asset,extract_sqlite
           tag='20261128-0102-1b6bd367'
-          release,asset=source_release(tag)
-          assert release['tag_name']==tag
+          import subprocess
           z=Path('source.zip');db=Path('canonical.sqlite3')
-          sha=download_asset(asset['browser_download_url'],asset['size'],z)
-          assert not asset.get('digest') or asset['digest']=='sha256:'+sha
+          subprocess.run(['curl','-fL','--retry','3','https://github.com/konoui/m-league-game-db/releases/download/'+tag+'/database.zip','-o',str(z)],check=True)
           extract_sqlite(z,db)
           assert hash_file(db)=='105445b19f7ab829457b47dea49f24b97bc265eaf8aabb987da2379ba7f5c8cf'
           c=sqlite3.connect(db.resolve().as_uri()+'?mode=ro',uri=True)
