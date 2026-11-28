@@ -352,8 +352,11 @@ def main():
             examples.append(dict(category=kind,**matches[0]))
     for eid,d in sorted(draw_class.items()):
         if d["target_count"] > 1 and d["down"] and d["same"]:
+            meta=dimensions[eid]
             examples.append(dict(category="same_draw_both_drop_and_maintain",draw_event_id=eid,
-                player_id=d["drawer"],opponent_count=d["target_count"],
+                game_id=meta["game_id"],game_date=meta["game_date"],season_start_year=meta["season_start_year"],
+                stage=meta["stage"],kyoku_id=meta["kyoku_id"],player_id=d["drawer"],
+                player_name=names[d["drawer"]],opponent_count=d["target_count"],
                 opponent_drop_rows=sum(float(r["rank_drop"])>0 for r in by_draw[eid]),
                 opponent_maintain_rows=sum(float(r["rank_drop"])==0 for r in by_draw[eid])))
             break

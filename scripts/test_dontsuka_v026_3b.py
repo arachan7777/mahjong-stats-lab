@@ -29,15 +29,15 @@ class Stage3BTests(unittest.TestCase):
 
     def test_multiple_opponents_are_one_draw_and_one_kyoku(self):
         rows = [
-            {"event_order": "10", "draw_event_id": "7", "rank_drop": "0.5", "drawer_rank_before": "1.0"},
-            {"event_order": "10", "draw_event_id": "7", "rank_drop": "0", "drawer_rank_before": "1.0"},
-            {"event_order": "20", "draw_event_id": "8", "rank_drop": "0.5", "drawer_rank_before": "2.0"},
+            {"event_order": "10", "draw_event_id": "7", "kyoku_id": "9", "drawer": "1", "rank_drop": "0.5", "drawer_rank_before": "1.0"},
+            {"event_order": "10", "draw_event_id": "7", "kyoku_id": "9", "drawer": "1", "rank_drop": "0", "drawer_rank_before": "1.0"},
+            {"event_order": "20", "draw_event_id": "8", "kyoku_id": "9", "drawer": "1", "rank_drop": "0.5", "drawer_rank_before": "2.0"},
         ]
         selected = first_rank_drop_event(rows)
         self.assertEqual(selected["draw_event_id"], "7")
         self.assertEqual(sum(float(r["rank_drop"]) > 0 for r in rows), 2)  # opponent unit
         self.assertEqual(len({r["draw_event_id"] for r in rows if float(r["rank_drop"]) > 0}), 2)  # draw unit
-        self.assertEqual(len({"kyoku-player"}), 1)  # kyoku-player denominator key
+        self.assertEqual(len({(r["kyoku_id"], r["drawer"]) for r in rows if float(r["rank_drop"]) > 0}), 1)
 
     def test_rank_and_ron_are_independent(self):
         self.assertEqual(kyoku_outcome(2.0, 1.5, True),
