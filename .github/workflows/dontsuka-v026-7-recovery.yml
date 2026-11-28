@@ -1,0 +1,87 @@
+name: ドンツカ総合研究 v0.26 第7工程観測区分修復
+on:
+  push:
+    branches: [codex/dontsuka-v026-base-20261128]
+    paths:
+      - '.github/workflows/dontsuka-v026-7-recovery.yml'
+      - 'research/dontsuka_v026_7/recover_observation_labels.py'
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+jobs:
+  recover:
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install mahjong==1.4.0
+      - name: Pinned readonly inputs
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          bash scripts/dontsuka_v026_5b_prepare.sh
+          gh api "/repos/$GITHUB_REPOSITORY/actions/artifacts/15260008983/zip" > /tmp/stage7-original.zip
+          echo '52a4fb032e4b7ba4847927ba1bed0fc1bcc996a6bb71d8c86974fcfa8dfd41b8  /tmp/stage7-original.zip' | sha256sum -c
+      - name: Correct observation labels only
+        shell: bash
+        run: |
+          set -o pipefail
+          mkdir -p results
+          python -u research/dontsuka_v026_7/recover_observation_labels.py /tmp/mahjong-fixed.sqlite3 /tmp/stage7-original.zip results/recovered 2>&1 | tee results/correction.log
+          mv results/correction.log results/recovered/recovery/
+      - name: Reuse all existing shards and merge
+        shell: bash
+        run: |
+          set -o pipefail
+          mkdir -p results/recovered/final
+          python -u scripts/dontsuka_v026_7_merge.py results/recovered/shards results/recovered/final --shards 16 2>&1 | tee results/recovered/final/merge.log
+      - name: Hash complete corrected result and build audit input
+        run: |
+          cp research/dontsuka_v026_7/recover_observation_labels.py research/dontsuka_v026_7/verify_db_history.py .github/workflows/dontsuka-v026-7-recovery.yml results/recovered/source/
+          python - <<'PY'
+          import hashlib,json,zipfile
+          from pathlib import Path
+          p=Path('results/recovered')
+          d={str(f.relative_to(p)):hashlib.file_digest(f.open('rb'),'sha256').hexdigest() for f in sorted(p.rglob('*')) if f.is_file() and f.name!='package_sha256.json'}
+          (p/'package_sha256.json').write_text(json.dumps(d,indent=2))
+          with zipfile.ZipFile('/tmp/stage7-corrected-audit.zip','w',compression=zipfile.ZIP_DEFLATED,compresslevel=3) as z:
+              for f in sorted(p.rglob('*')):
+                  if f.is_file():z.write(f,str(f.relative_to(p)))
+          PY
+      - name: Independent SQL audit of corrected package
+        shell: bash
+        run: |
+          set -o pipefail
+          mkdir -p results/history
+          SHA=$(sha256sum /tmp/stage7-corrected-audit.zip | cut -d' ' -f1)
+          python -u research/dontsuka_v026_7/verify_db_history.py /tmp/mahjong-fixed.sqlite3 /tmp/stage7-corrected-audit.zip results/history "$SHA" 2>&1 | tee results/history/run.log
+          sha256sum results/recovered/package_sha256.json > results/history/audited_package_manifest_sha256.txt
+      - name: Finalize independent audit manifest after log close
+        if: always()
+        run: |
+          mkdir -p results/history
+          cp research/dontsuka_v026_7/verify_db_history.py results/history/
+          python - <<'PY'
+          import hashlib,json
+          from pathlib import Path
+          p=Path('results/history')
+          (p/'manifest.json').write_text(json.dumps({f.name:hashlib.file_digest(f.open('rb'),'sha256').hexdigest() for f in p.iterdir() if f.is_file() and f.name!='manifest.json'},indent=2))
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: dontsuka-v026-7-recovery-${{ github.run_id }}
+          path: results/recovered/
+          if-no-files-found: warn
+          retention-days: 30
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: dontsuka-v026-7-history-${{ github.run_id }}
+          path: results/history/
+          if-no-files-found: warn
+          retention-days: 30
