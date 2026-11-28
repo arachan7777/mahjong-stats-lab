@@ -58,7 +58,9 @@ def main():
                 kan=(n1,t1,o1);end=(n2,o2)
                 require(t2 in ("draw","ron","tsumo","ryukyoku"),"unexpected successor after kan")
                 link="kan_robbed" if t2=="ron" else "kan_before_rinshan" if t2=="draw" else "kan_round_end"
-                if t2=="draw":require(r["rinshan_actor"]==pid and r["next_rinshan"]==1,"kan next draw not own rinshan")
+                if t2=="draw":
+                    if r["rinshan_actor"]!=pid:link="kan_followed_by_other_draw"
+                    elif r["next_rinshan"]!=1:link="kan_followed_by_own_draw_unmarked"
             elif t1=="draw":link="next_draw_without_discard"
             elif t1=="discard":link="other_discard_before_own_discard"
             elif t1 in ("chi","pon","daiminkan","ankan","shominkan"):link="call_without_own_discard"
