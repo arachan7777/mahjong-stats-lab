@@ -112,7 +112,7 @@ def main():
         key=(int(r["kyoku_id"]),int(r["p"]))
         require(key not in declarations,"accepted declaration duplicate")
         declarations[key]=(int(r["declaration_id"]),int(r["declaration_order"]),int(r["marker"]))
-    require(len(declarations)==22205,"accepted riichi count")
+    require(len(declarations)==c.execute("SELECT COUNT(*) FROM reach_event WHERE is_accepted=1").fetchone()[0],"accepted riichi markers and declaration correspondence")
     for did,(ky,pid,o,ab,aa) in accepted_draw_discard.items():
         d=declarations.get((ky,pid));require(ab==int(d is not None and d[1]<o) and aa==int(d is not None and d[1]<=o),"established reach boundary")
     pairs=list(rows(z,"final/opponent_genbutsu.csv.gz"))
