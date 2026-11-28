@@ -16,7 +16,7 @@ class Tests(unittest.TestCase):
     def test_transitions(self):
         h="1m 2m 3m 1p 2p 3p 1s 2s 3s 1z 1z 4m 5m".split()
         i=h[:-1]+["9m"]
-        fixtures=[(h,"9p","9p",0,0,"tenpai_maintained"),(h,"9p","1m",0,1,"tenpai_broken"),(i,"5m","9m",1,0,"progress"),(i,"9p","9p",1,1,"maintained"),(i,"9p","1m",1,2,"regress")]
+        fixtures=[(h,"9p","9p",0,0,"tenpai_maintained"),(h,"9p","1m",0,1,"tenpai_broken"),(i,"5m","9m",1,0,"progress"),(i,"9p","9p",1,1,"maintained"),(i,"9p","2p",1,2,"regress")]
         for tiles,d,t,x,y,label in fixtures:
             a,m,b,cl=transition(tiles,d,t)
             self.assertEqual((a["shanten"],b["shanten"],cl[1]),(x,y,label),(tiles,d,t,a,b))
@@ -26,7 +26,7 @@ class Tests(unittest.TestCase):
             hh=rng.sample(deck,13)
             if sh(vector(hh))!=2:continue
             d=next(t for t in TYPES if Counter(hh)[t]<4 and t not in hh)
-            for t in set(hh):
+            for t in sorted(set(hh)):
                 final=hh+[d];final.remove(t)
                 if sh(vector(final))==3:
                     a,m,b,cl=transition(hh,d,t);self.assertEqual((a["shanten"],b["shanten"],cl[1]),(2,3,"regress"));print("2 to 3 fixture",hh,d,t);return
