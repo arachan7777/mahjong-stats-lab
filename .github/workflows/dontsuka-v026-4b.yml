@@ -7,6 +7,7 @@ on:
       - 'scripts/dontsuka_v026_4b.py'
       - 'scripts/test_dontsuka_v026_4b.py'
       - 'scripts/dontsuka_v026_4b_core.py'
+      - 'scripts/test_dontsuka_v026_4b_physical.py'
   workflow_dispatch:
 permissions:
   contents: read
@@ -29,6 +30,7 @@ jobs:
         run: |
           set -o pipefail
           python scripts/test_dontsuka_v026_4b.py 2>&1 | tee results/dontsuka_v026_4b/artificial_tests.txt
+          python scripts/test_dontsuka_v026_4b_physical.py 2>&1 | tee results/dontsuka_v026_4b/artificial_physical_tests.txt
       - name: Fetch approved Stage 2A, 2B, 3A, 3B, 4A artifacts
         env:
           GH_TOKEN: ${{ github.token }}

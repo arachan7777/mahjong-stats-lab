@@ -54,5 +54,5 @@ def ron_result(s,links,winner,rank_before,rank_end,source_kind,tsumogiri,
     elif accepted_before:result.update(reason="unresolved_accepted_reach_non_tsumogiri")
     elif open_before:result.update(sage=1,reason="open_tsumogiri" if tsumogiri else "open_tedashi")
     elif closed_tenpai_before is True:result.update(sage=1,reason="damaten_tsumogiri" if tsumogiri else "damaten_tedashi")
-    else:result.update(reason="unresolved_closed_non_tenpai_or_unknown")
+    else:result.update(sage=1,reason="closed_selected_tsumogiri" if tsumogiri else "closed_selected_tedashi")
     return result

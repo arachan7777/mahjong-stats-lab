@@ -237,6 +237,35 @@ def main():
     totals=[dict(scope=k[0],season_start_year=k[1],stage=k[2],**metrics(v)) for k,v in sorted(combined.items())]
     overall=metrics(combined[("all_period","","")])
     if overall["sage_numerator"]>overall["tolerated"] or overall["tolerated"]>overall["coexist_kyoku"] or overall["coexist_kyoku"]!=len(rounds) or any(r["starts"]!=1 or r["starts"]+r["restarts"]!=r["ends"] for r in rounds):errors.append(dict(error="aggregate conservation"))
+    # Audit the literal instant-based rule without changing the denominator.
+    # A draw is not an available ordinary-ron window for its own actor.
+    # Distinguish transient interruptions from later structural changes.
+    diagnostics=[]
+    for k, rows in group(timeline,lambda r:(r["kyoku_id"],r["player_id"])).items():
+        rows=sorted(rows,key=lambda r:r["event_order"])
+        active=False
+        for i,r in enumerate(rows):
+            typ=r["transition"]
+            if typ in ("start","restart"):
+                if active or (typ=="start")!=(i==0):
+                    errors.append(dict(error="timeline start/restart order",detail=js(r)))
+                active=True
+            elif typ=="end":
+                if not active:errors.append(dict(error="timeline end order",detail=js(r)))
+                active=False
+                previous={tuple(x) for x in json.loads(r["previous_down"])+json.loads(r["previous_maintain"])}
+                current={tuple(x) for x in json.loads(r["down_origins"])+json.loads(r["maintain_origins"])}
+                lost=previous-current
+                evidence={tuple(x):d for x,d in json.loads(r["evidence"])}
+                pure14=bool(lost) and r["event_type"]=="draw" and all(x in evidence and evidence[x]["effective_tiles"]==14 and evidence[x]["reason"]=="not_13_tile_waiting_state" and x[1]==r["actor"] for x in lost)
+                nxt=rows[i+1] if i+1<len(rows) else None
+                same_restore=bool(pure14 and nxt and nxt["transition"]=="restart" and nxt["event_type"]=="discard" and nxt["actor"]==r["actor"] and nxt["down_origins"]==r["previous_down"] and nxt["maintain_origins"]==r["previous_maintain"])
+                diagnostics.append(dict(kyoku_id=k[0],player_id=k[1],end_event_id=r["event_id"],end_event_type=r["event_type"],actor=r["actor"],pure_draw_14=int(pure14),same_state_restored_at_next_transition_discard=int(same_restore),next_transition_event_id=nxt["event_id"] if nxt else "",lost_origins=js(sorted(lost)),evidence=r["evidence"]))
+            elif typ=="change" and not active:errors.append(dict(error="timeline change outside coexistence",detail=js(r)))
+        if active:errors.append(dict(error="timeline never ended",detail=js(rows[-1])))
+    emit(a.out,"coexistence_14_tile_audit.csv",diagnostics,["kyoku_id","player_id","end_event_id","pure_draw_14"])
+    audit14=dict(end_count=len(diagnostics),pure_draw_14=sum(r["pure_draw_14"] for r in diagnostics),same_state_restored_at_next_transition_discard=sum(r["same_state_restored_at_next_transition_discard"] for r in diagnostics))
+    if audit14["end_count"]!=overall["ends"]:errors.append(dict(error="end audit count"))
     emit(a.out,"coexistence_timeline.csv",timeline,["kyoku_id","player_id","event_id","transition"])
     emit(a.out,"coexistence_kyoku.csv",rounds,["kyoku_id","player_id"])
     emit(a.out,"all_ron_decisions.csv",decisions,["ron_event_id","reason"])
@@ -248,7 +277,7 @@ def main():
     emit(a.out,"unresolved.csv",uncertain,["kyoku_id","player_id","event_id","reason"])
     emit(a.out,"matrix_reconstruction.csv",fallback,["kyoku_id","player_id","event_id","target","tile_type","evidence"])
     (a.out/"real_examples.json").write_text(js(examples),encoding="utf-8")
-    manifest=dict(scope="Stage 4B only",status="incomplete" if errors or uncertain else "computed",database=dbm,database_sha256=DB_SHA,approved_origin_count=len(origins),approved_change_count=len(changes),approved_link_count=len(links),candidate_player_rounds=len(candidates),candidate_rounds=len(byky),error_count=len(errors),unresolved_count=len(uncertain),matrix_reconstruction_count=len(fallback),counts=overall,notes=["ordinary ron state follows approved Stage 1 snapshot and action freshness; physical 13-effective-tile waiting state required","closed non-tenpai or unknown selection not inferred","results provisional when unresolved or errors exist"])
+    manifest=dict(scope="Stage 4B only",status="incomplete" if errors or uncertain else "computed",database=dbm,database_sha256=DB_SHA,approved_origin_count=len(origins),approved_change_count=len(changes),approved_link_count=len(links),candidate_player_rounds=len(candidates),candidate_rounds=len(byky),error_count=len(errors),unresolved_count=len(uncertain),matrix_reconstruction_count=len(fallback),coexistence_14_tile_audit=audit14,counts=overall,notes=["ordinary ron state follows approved Stage 1 snapshot and action freshness; physical 13-effective-tile waiting state required","all pre-accepted-riichi discard choices included regardless of shanten; accepted non-tsumogiri remains unresolved","results provisional when unresolved or errors exist"])
     (a.out/"manifest.json").write_text(json.dumps(manifest,ensure_ascii=False,indent=2)+"\n",encoding="utf-8")
     print(json.dumps(manifest,ensure_ascii=False),flush=True)
     if errors or uncertain:raise SystemExit(1)

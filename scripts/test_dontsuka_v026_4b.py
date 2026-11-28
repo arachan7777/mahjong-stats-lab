@@ -61,6 +61,10 @@ class Test(unittest.TestCase):
         self.assertEqual(r["sage"],1)
     def test_historical_not_current(self):
         self.assertEqual(self.ron(s=self.s(5,(False,True)))["tolerated"],0)
-    def test_unresolved_closed(self):
-        self.assertTrue(self.ron(closed_tenpai_before=False)["reason"].startswith("unresolved"))
+    def test_closed_non_tenpai(self):
+        for tenpai in (False,None):
+            for ts in (False,True):
+                self.assertEqual(self.ron(closed_tenpai_before=tenpai,tsumogiri=ts)["sage"],1)
+    def test_accepted_non_tsumogiri_not_inferred(self):
+        self.assertTrue(self.ron(accepted_before=True)["reason"].startswith("unresolved"))
 if __name__=="__main__":unittest.main(verbosity=2)
