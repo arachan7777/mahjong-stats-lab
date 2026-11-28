@@ -1,0 +1,30 @@
+name: ドンツカ v0.26 第5工程A 修正版ソース保存
+on:
+  push:
+    branches: [codex/dontsuka-v026-base-20261128]
+    paths: ['.github/workflows/dontsuka-v026-5a-source.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  source:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: b43ee9709280fb31d472e0502c9717b511d10758
+      - name: Archive exact source revision
+        run: |
+          mkdir -p results/source/scripts results/source/.github/workflows
+          cp scripts/dontsuka_v026_5a.py scripts/dontsuka_v026_5a_core.py scripts/test_dontsuka_v026_5a.py results/source/scripts/
+          cp .github/workflows/dontsuka-v026-5a.yml .github/workflows/dontsuka-v026-5a-diagnostic.yml results/source/.github/workflows/
+          cd results/source
+          git rev-parse HEAD > source_commit.txt
+          find . -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dontsuka-v026-5a-revised-source
+          path: results/source/
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 30
