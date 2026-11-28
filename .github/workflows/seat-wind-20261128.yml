@@ -1,0 +1,75 @@
+name: 20261128 東南西北初期座席別トップ率試運転
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'seat-wind-run-20261128.txt'
+
+permissions:
+  contents: read
+
+jobs:
+  current-seat-wind:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: 20261128正本固定版を取得し整合性を検証
+        run: |
+          python - <<'PY'
+          import json, sqlite3, tempfile
+          from pathlib import Path
+          from scripts.export_weekly_delta_20261128 import source_release
+          from scripts.check_latest_db import request, download_asset, extract_sqlite
+          import os
+          tag="20261128-0102-1b6bd367"
+          release,asset=source_release(tag)
+          Path("seat-work").mkdir(exist_ok=True)
+          zip_path=Path("seat-work/source.zip")
+          db_path=Path("seat-work/canonical.sqlite3")
+          downloaded_sha=download_asset(asset["browser_download_url"], asset["size"],zip_path)
+          print("Downloaded",tag,asset["size"],downloaded_sha,flush=True)
+          assert release["tag_name"]==tag
+          assert not asset.get("digest") or asset["digest"]=="sha256:"+downloaded_sha
+          extract_sqlite(zip_path,db_path)
+          conn=sqlite3.connect(str(db_path))
+          assert conn.execute("PRAGMA quick_check").fetchone()[0]=="ok"
+          expected={"game":2084,"kyoku":25437,"event":2779703}
+          actual={table:conn.execute("SELECT COUNT(*) FROM "+table).fetchone()[0] for table in expected}
+          assert actual==expected,(actual,expected)
+          assert conn.execute("SELECT MAX(date) FROM game").fetchone()[0]=="2026-11-27"
+          conn.close()
+          Path("results").mkdir(exist_ok=True)
+          Path("results/seat_wind_20261128_source.json").write_text(json.dumps({"tag":tag,"sha256":downloaded_sha,"counts":actual,"last_date":"2026-11-27"},ensure_ascii=False,indent=2)+"\n",encoding="utf-8")
+          print("CANONICAL_VALIDATED",json.dumps(actual),flush=True)
+          PY
+      - name: 原典SQLを無変更で再集計
+        run: |
+          python research/rank_seat_wind_white_black_v01.py seat-work/canonical.sqlite3
+      - name: 対象年度と席ごとの件数確認
+        run: |
+          python - <<'PY'
+          import json
+          d=json.load(open("results/seat_wind_summary.json"))
+          assert d["status"]=="SUCCESS"
+          assert d["all_db_games"]==2084
+          assert d["all_db_player_game_rows"]==8336
+          for period in ("2018-19以降_全ステージ参考","二卓時代_レギュラー","2026-27_レギュラー"):
+              x=d["rankings"][period]["白黒合算"]
+              counts={a["seat"]:a["games"] for a in x}
+              assert len(counts)==4 and len(set(counts.values()))==1
+              print("PERIOD",period,json.dumps([{"seat":a["seat"],"games":a["games"],"wins":a["first_count"],"first_pct":a["first_pct"],"fourth_count":a["fourth_count"],"fourth_pct":a["fourth_pct"],"average_rank":a["average_rank"],"average_pt":a["average_pt"]} for a in sorted(x,key=lambda v:v["seat_code"])],ensure_ascii=False),flush=True)
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: seat-wind-stats-20261128-2084-games
+          path: |
+            results/seat_wind_summary.json
+            results/seat_wind_all_splits.csv
+            results/seat_wind_20261128_source.json
+          if-no-files-found: error
+          retention-days: 30
