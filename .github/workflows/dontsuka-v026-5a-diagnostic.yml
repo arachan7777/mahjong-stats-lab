@@ -1,0 +1,98 @@
+name: ドンツカ v0.26 第5工程A 192件診断
+on:
+  push:
+    branches: [codex/dontsuka-v026-base-20261128]
+    paths: ['.github/workflows/dontsuka-v026-5a-diagnostic.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+jobs:
+  diagnostic:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install mahjong==1.4.0
+      - name: Read original evidence and fixed DB
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p results/5a_diagnostic
+          gh api /repos/${{ github.repository }}/actions/artifacts/15255583466/zip > /tmp/5a-original.zip
+          echo '23207b8e84e0fbb14633204fd297bab36936b1bdc3a12b1bc7e28e4a60a5a95b  /tmp/5a-original.zip' | sha256sum -c
+          curl --fail --location --retry 3 https://github.com/konoui/m-league-game-db/releases/download/20261120-2341-04338cbb/database.zip -o /tmp/db.zip
+          echo 'e2e702402301ae136da71e3f79113f929e291779ff4997c24db5262aaa4ff548  /tmp/db.zip' | sha256sum -c
+          python - <<'PY'
+          import zipfile,shutil
+          with zipfile.ZipFile('/tmp/db.zip') as z:
+              x=[x for x in z.infolist() if x.file_size==873754624]
+              assert len(x)==1
+              with z.open(x[0]) as i,open('/tmp/fixed.sqlite3','wb') as o:shutil.copyfileobj(i,o)
+          PY
+          echo 'edeccd86e100f6ffba88871d7c418a06488d3f515b22cdd2e2b9dced17573e6c  /tmp/fixed.sqlite3' | sha256sum -c
+      - name: Trace each original exception without changing the replay
+        env:
+          PYTHONPATH: scripts
+        run: |
+          python - <<'PY'
+          import csv,io,json,zipfile,sqlite3,hashlib
+          from collections import Counter,defaultdict
+          from pathlib import Path
+          from dontsuka_v026_2a_audit import events
+          from dontsuka_v026_2a_replay import Replay
+          from dontsuka_v026_5a_core import sh,vector,candidates
+          out=Path('results/5a_diagnostic')
+          with zipfile.ZipFile('/tmp/5a-original.zip') as z:
+              p=next(p for p in z.namelist() if p.endswith('unresolved_and_discrepancies.csv'))
+              raw=z.read(p)
+              bad=list(csv.DictReader(io.StringIO(raw.decode('utf-8-sig'))))
+              (out/'original_unresolved.csv').write_bytes(raw)
+          assert len(bad)==192 and len({int(r['kyoku_id']) for r in bad})==69
+          assert sum(int(r['is_dontsuka']) for r in bad)==5
+          grouped=defaultdict(dict)
+          for r in bad:grouped[int(r['kyoku_id'])][int(r['draw_event_id'])]=r
+          c=sqlite3.connect('file:/tmp/fixed.sqlite3?mode=ro',uri=True);c.row_factory=sqlite3.Row
+          findings=[];traces={}
+          for ky,targets in sorted(grouped.items()):
+              rp=Replay();ps={};ts={};previous={};trace=[]
+              actions=defaultdict(list);snaps=defaultdict(list)
+              for table,bucket in [('player_state',actions),('player_tenpai_state',snaps)]:
+                  for r in c.execute(f'SELECT ps.*,e.event_order FROM {table} ps JOIN event e ON e.id=ps.event_id WHERE e.kyoku_id=?',(ky,)):
+                      bucket[r['event_id']].append(dict(r))
+              for ev in events(c,ky):
+                  eid=ev['id'];p=ev.get('actor');k=ev['type']
+                  h=list(rp.hands.get(p,[]));m=list(rp.melds.get(p,[]))
+                  n=len(h)+3*len(m)
+                  q=sh(vector(h)) if k=='draw' and n==13 else None
+                  prior=previous.get(p)
+                  if eid in targets:
+                      r=targets[eid]
+                      finding=dict(original=r,prior_actor_action=prior,event=ev,concealed=h,melds=m,effective=n,physical_shanten=q,previous_state=ps.get(p),previous_tenpai=ts.get(p),at_draw_state=actions[eid],at_draw_tenpai=snaps[eid],omote=list(rp.omote))
+                      findings.append(finding)
+                      print('CASE',ky,eid,r['error'],'effective',n,'rinshan',ev.get('rinshan'),'previous',prior and prior['type'],'q',q,'db',ps.get(p,{}).get('shanten_count'),'state',ps.get(p,{}).get('event_order'),'tenpai',ts.get(p,{}).get('event_order'),'draw',ev['event_order'],'dontsuka',r['is_dontsuka'],flush=True)
+                  if k not in ('ron','tsumo','ryukyoku'):rp.step(ev)
+                  for x in actions[eid]:ps[x['player_id']]=x
+                  for x in snaps[eid]:ts[x['player_id']]=x
+                  trace.append(dict(event=ev,before_effective=n,after_effective=len(rp.hands.get(p,[]))+3*len(rp.melds.get(p,[])),actor_hand_after=list(rp.hands.get(p,[])),actor_melds_after=[(a,list(b)) for a,b in rp.melds.get(p,[])],states=actions[eid],tenpai=snaps[eid]))
+                  if p is not None:previous[p]=ev
+              traces[str(ky)]=trace
+          assert len(findings)==192
+          for name,obj in [('findings.json',findings),('round_traces.json',traces)]:
+              (out/name).write_text(json.dumps(obj,ensure_ascii=False,indent=2),encoding='utf-8')
+          summary=dict(cases=len(findings),rounds=len(traces),counts=dict(Counter(x['original']['error'] for x in findings)),effective=dict(Counter(str(x['effective']) for x in findings)),rinshan_by_error=dict(Counter(x['original']['error']+' / '+str(x['event']['rinshan']) for x in findings)),status='diagnosis evidence only; no correction or approval')
+          (out/'summary.json').write_text(json.dumps(summary,ensure_ascii=False,indent=2),encoding='utf-8')
+          print(json.dumps(summary,ensure_ascii=False))
+          (out/'sha256.json').write_text(json.dumps({p.name:hashlib.file_digest(p.open('rb'),'sha256').hexdigest() for p in out.iterdir()},indent=2))
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: dontsuka-v026-5a-diagnostic-${{ github.run_id }}
+          path: results/5a_diagnostic/
+          if-no-files-found: error
+          retention-days: 30
