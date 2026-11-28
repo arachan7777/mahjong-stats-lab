@@ -1,0 +1,31 @@
+{
+  "diagnostics": [
+    {
+      "run_id": 46086032873,
+      "artifact_id": 15238199524,
+      "drive_id": "1AFk02I3sImrRH-nAHzb0LitRbzTlV5gH",
+      "sha256": "e25cca5ed1445f004e2931ea30c103e04e175543310a1bff27825b90688ea064",
+      "manifest_members": 3
+    },
+    {
+      "run_id": 46086174648,
+      "artifact_id": 15238189694,
+      "drive_id": "14WdB_nFKWybLx5ldUinB8A3azCQkuuJx",
+      "sha256": "5a79893e8e502c4d29b8fe601f62b7c2a73a4f86c110d5a51daa5853e277fec4",
+      "manifest_members": 5
+    }
+  ],
+  "crc_and_member_hashes_match": true,
+  "diagnostic_csvs_identical": true,
+  "compared": 28060,
+  "dora_timing_explained": 15,
+  "base_difference": 14,
+  "rank_class_difference": 1,
+  "raw_matrix_sensitivity": {
+    "base_difference": 851,
+    "rank_class_difference": 91,
+    "down": 13079,
+    "head_down": 12844
+  },
+  "prior_exact_attribution": "unavailable: prior event-level results and exact code not saved"
+}
