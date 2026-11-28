@@ -1,0 +1,30 @@
+{
+  "stage3a_drive_readback_sha256": "da593920add867904fc82f8f51207a6fe318fa42a2945e1880c5653112fe4ce1",
+  "stage3a_actions_sha256": "da593920add867904fc82f8f51207a6fe318fa42a2945e1880c5653112fe4ce1",
+  "stage2a_zip_sha256": "77a165910c731a63a52d3eda966050dddf164cd12ab0b0130979c9ce39e58a17",
+  "stage2b_zip_sha256": "a81dd53043b557edbccd1dcc4ab0db798a6c71db68aebbd12532272e600a2781",
+  "all_manifest_members_matched": true,
+  "all_zip_crc_passed": true,
+  "stage2a_difference_csv_byte_match": true,
+  "snapshots": 1257732,
+  "target_events_matched": 27578,
+  "independently_checked_opponent_settlements": 28060,
+  "independently_checked_head_results": 27578,
+  "independently_checked_ron_arithmetic": 28060,
+  "counts": {
+    "opponent_rows": 28060,
+    "draws": 27578,
+    "opponent_down": 13170,
+    "opponent_same": 14890,
+    "head_down": 12931,
+    "evaluation_failures": 0
+  },
+  "prior_aggregate_difference": {
+    "head_down": -59,
+    "opponent_down": -58,
+    "opponent_same": 58
+  },
+  "status": "readback_matched; prior aggregate difference requires investigation",
+  "drive_file_id": "1s9I7VLoB0L3eZPdQ7llrRuvj9UYfuBhO",
+  "run_id": 46085666669
+}
