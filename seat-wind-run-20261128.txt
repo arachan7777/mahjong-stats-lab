@@ -1,0 +1,1 @@
+20261128 Seat-wind re-evaluation on 2084-game current canonical release; original research SQL and script reused.
