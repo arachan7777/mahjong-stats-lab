@@ -1,0 +1,63 @@
+name: ドンツカ総合研究 v0.26 第5工程B 統合復旧
+on:
+  push:
+    branches: [codex/dontsuka-v026-base-20261128]
+    paths:
+      - '.github/workflows/dontsuka-v026-5b-recovery.yml'
+      - 'research/dontsuka_v026_5b/recover_46129400324.py'
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+jobs:
+  recovery:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install mahjong==1.4.0
+      - name: Download immutable source archives
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh api /repos/$GITHUB_REPOSITORY/actions/artifacts/15256589367/zip > /tmp/original.zip
+          gh api /repos/$GITHUB_REPOSITORY/actions/artifacts/15256940222/zip > /tmp/approved5a.zip
+      - name: Verify original data and recover log manifest only
+        run: |
+          set -o pipefail
+          mkdir -p results
+          python -u research/dontsuka_v026_5b/recover_46129400324.py /tmp/original.zip /tmp/approved5a.zip results 2>&1 | tee results/recovery.log
+      - name: Original merge with full hash validation and original source identity
+        run: |
+          set -o pipefail
+          GITHUB_SHA=10859209fbef7e1ec475d382a74785ce3fe123d4 GITHUB_RUN_ID=46129400324 python -u scripts/dontsuka_v026_5b_merge.py results/corrected results/final --shards 16 2>&1 | tee results/merge.log
+      - name: Final verification and closed-log package manifest
+        run: |
+          python - <<'PY'
+          import hashlib,json,os,shutil
+          from pathlib import Path
+          p=Path('results');m=json.loads((p/'final/manifest.json').read_text());a=json.loads((p/'evidence/recovery_audit.json').read_text())
+          for k,v in a['counts'].items():assert m['counts'][k]==v
+          for n,h in m['outputs'].items():assert hashlib.file_digest((p/'final'/n).open('rb'),'sha256').hexdigest()==h
+          m2=dict(m,recovery_run_id=os.environ['GITHUB_RUN_ID'],recovery_commit=os.environ['GITHUB_SHA'],source_artifact_id=15256589367,source_artifact_sha256=a['original_artifact_sha256'],log_repair=a,stage6_started=False,status='verified_pending_drive_readback')
+          (p/'evidence/final_verification.json').write_text(json.dumps(m2,ensure_ascii=False,indent=2))
+          report=['# ドンツカ総合研究 v0.26 第5工程B 最終統合検証報告','固定版DB 20261120-2341-04338cbb。原実行46129400324、元16分割を再利用。全件探索の再実行なし。','原因：teeによる実行ログの書き込み終了より先にハッシュを取得し、その後Manifest要約が追記された。旧ログ接頭部と追記内容を16/16で検証し、閉じたログのハッシュを別Manifestに記録。元Manifestと元ファイルは保存し変更しない。集計関連128/128、補正ログ16/16、全ツモのIDと属性を第5工程Aと照合。','## 全件集計']+[f'- {k}: {v}' for k,v in m['overall'].items()]+['## 停止範囲','第6工程未着手。原典・正本DB・承認済み成果物の変更なし。指定Driveへの保存及び再取得照合は別途記録。']
+          (p/'evidence/report.md').write_text('\n'.join(report)+'\n',encoding='utf-8')
+          src=p/'source';src.mkdir()
+          for f in [*Path('scripts').glob('dontsuka_v026_5b*'),Path('scripts/test_dontsuka_v026_5b.py'),Path('research/dontsuka_v026_5b/recover_46129400324.py'),Path('.github/workflows/dontsuka-v026-5b.yml'),Path('.github/workflows/dontsuka-v026-5b-recovery.yml')]:shutil.copy2(f,src/f.name)
+          hashes={str(f.relative_to(p)):hashlib.file_digest(f.open('rb'),'sha256').hexdigest() for f in sorted(p.rglob('*')) if f.is_file()}
+          (p/'package_sha256.json').write_text(json.dumps(hashes,indent=2))
+          for n,h in hashes.items():assert hashlib.file_digest((p/n).open('rb'),'sha256').hexdigest()==h
+          print(json.dumps(dict(overall=m['overall'],counts=m['counts'],verified_package_files=len(hashes)),ensure_ascii=False))
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: dontsuka-v026-5b-recovery-${{ github.run_id }}
+          path: results/
+          if-no-files-found: error
+          retention-days: 30
