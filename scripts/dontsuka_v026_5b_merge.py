@@ -13,7 +13,7 @@ def main():
     p=argparse.ArgumentParser();p.add_argument("source",type=Path);p.add_argument("out",type=Path);p.add_argument("--shards",type=int,required=True);a=p.parse_args()
     a.out.mkdir(parents=True,exist_ok=True)
     manifests=sorted(a.source.glob("*/manifest.json"));require(len(manifests)==a.shards,"shard manifest count")
-    counts=Counter();seen=set();kys=set();shards=set();rounds={};details=set();hit=set();stats=defaultdict(Counter);examples={};names=None;perf=[]
+    counts=Counter();seen=set();kys=set();shards=set();rounds={};details=set();hit=set();stats=defaultdict(Counter);examples={};names=None;perf=[];fouls=[]
     def add(r,**metrics):
         for key in dimension_keys(r):stats[(int(r["player_id"]),*key)].update(metrics)
     for path in manifests:
@@ -23,14 +23,14 @@ def main():
         require(m["shard"] not in shards and not kys.intersection(m["kyoku_ids"]),"overlap shard")
         shards.add(m["shard"]);kys.update(m["kyoku_ids"])
         for n,h in m["outputs"].items():require(sha256_file(d/n)==h,"member hash "+n)
-        local=Counter();local_q=set();local_hit=set()
+        local=Counter();local_q=set();local_hit=set();local_ky=set(m["kyoku_ids"]);local_foul=set()
         for r in stream(d/"coverage.csv.gz"):
             eid=int(r["draw_event_id"]);dd=int(r["is_dontsuka"])
-            require(eid not in seen and int(r["kyoku_id"]) in m["kyoku_ids"],"duplicate/outside draw")
+            require(eid not in seen and int(r["kyoku_id"]) in local_ky,"duplicate/outside draw")
             seen.add(eid);local.update(draws=1,basic=dd)
             add(r)
             if r["status"]=="not_applicable_actual_foul":
-                require(not r["is_shoubute"],"excluded not blank");local.update(excluded=1,excluded_basic=dd)
+                require(not r["is_shoubute"],"excluded not blank");local.update(excluded=1,excluded_basic=dd);local_foul.add(eid)
             else:
                 require(r["status"]=="evaluated","unresolved");local["evaluated"]+=1
                 if r["physical_shanten"]=="1":
@@ -60,11 +60,13 @@ def main():
         require(local==Counter(m["counts"]),"shard count mismatch")
         counts.update(local)
         require(not read(d/"errors.json"),"shard error records")
+        fr=read(d/"exclusions.json");require(len(fr)==len(local_foul) and {int(x["draw_event_id"]) for x in fr}==local_foul,"exclusion details");fouls.extend(fr)
         for k,v in read(d/"real_examples.json").items():examples.setdefault(k,v)
         nm=read(d/"names.json");require(names is None or names==nm,"player names mismatch");names=nm
-        perf.append({k:m[k] for k in ("shard","elapsed_seconds","peak_rss_kib","scoring_cache","structural_cache","counts")})
+        perf.append({k:m[k] for k in ("shard","elapsed_seconds","processing_seconds","peak_rss_kib","scoring_cache","structural_cache","counts")})
     require(shards==set(range(a.shards)) and len(kys)==25238 and len(seen)==1257732 and len(names)==56,"full identity")
     require(tuple(counts[k] for k in ("draws","basic","evaluated","excluded","excluded_basic"))==(1257732,27578,1257599,133,1),"approved totals")
+    require(Counter(r["reason"] for r in fouls)==Counter({"少牌":119,"多牌":14}),"approved foul reason counts")
     require(len(details)==counts["isshanten"] and len(hit)==counts["shoubute_dontsuka"],"detail counts")
     fields=["isshanten_draws","isshanten_dontsuka","shoubute_isshanten_draws","shoubute_isshanten_dontsuka","shoubute_isshanten_dontsuka_kyoku","self_wins","actual_ron_kyoku","kyoku_net_sum","ron_category_immediate","ron_category_subsequent","ron_category_different_tile","ron_category_no_ron","ron_category_special_excluded"]
     def metrics(c):
@@ -84,6 +86,7 @@ def main():
     write_csv(a.out/"shoubute_isshanten_dontsuka_kyoku.csv",rr,list(rr[0]) if rr else ["kyoku_id","player_id"])
     write_json(a.out/"real_examples.json",examples);write_json(a.out/"performance.json",perf)
     write_json(a.out/"unresolved.json",[])
+    write_csv(a.out/"not_applicable_actual_fouls.csv",fouls,list(dict.fromkeys(k for r in fouls for k in r)))
     # Full details remain compressed per shard; manifest identifies every archive.
     manifest=dict(scope="5B only",status="computed_pending_independent_readback",release="20261120-2341-04338cbb",database_sha256=DB_SHA,stage5a_sha256=A_SHA,run_id=os.getenv("GITHUB_RUN_ID"),commit=os.getenv("GITHUB_SHA"),counts=dict(counts),overall=overall,shards=a.shards,errors=0,draw_identity_match=True,definitions_unchanged=True,stage6_started=False)
     report=["# ドンツカ総合研究 v0.26 第5工程B 集計報告","固定版DB：20261120-2341-04338cbb。第6工程以降は未着手。","全件ID・承認済み基本件数・133件適用外・分割重複欠落を照合。成果物の保存・再取得確認は別途。","## 集計値"]+[f"- {k}: {v}" for k,v in overall.items()]+["## 取り扱い","勝負手判定はツモ直前、全進行候補・ロン／ツモを評価。第5工程A採点を再利用。既存放銃分類は選手局単位で保持。局収支・成就率は発生選手局を重複計上しない。","第5工程Aとの重複識別フラグは保持するが、合算集計は実施しない。"]
