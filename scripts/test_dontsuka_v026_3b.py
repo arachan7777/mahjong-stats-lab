@@ -16,7 +16,7 @@ class Stage3BTests(unittest.TestCase):
 
     def test_lone_fourth_cannot_drop_below_fourth(self):
         self.assertEqual(ranks({1: 10000, 2: 30000, 3: 30000, 4: 30000})[1], 4)
-        self.assertEqual(4.0 - 4.0, 0.0)
+        self.assertEqual(kyoku_outcome(4.0, 4.0, False)["rank_maintained_or_improved"], 1)
 
     def test_first_rank_drop_moment_is_retained(self):
         rows = [
