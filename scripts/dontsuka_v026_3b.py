@@ -202,6 +202,7 @@ def main():
     if len(head_rows) != 27578 or head_down != 12931:
         raise ValueError("head-bump unit mismatch")
     head_by_draw = {int(r["draw_event_id"]): r for r in head_rows}
+    head_drop_draw_ids = {int(r["draw_event_id"]) for r in head_rows if float(r["rank_drop"]) > 0}
 
     # Distinct basic-draw unit, kept separate from per-opponent and head-bump units.
     draw_class = {}
@@ -337,7 +338,7 @@ def main():
             game_id=dimensions[eid]["game_id"], kyoku_id=dimensions[eid]["kyoku_id"],
             opponent_count=d["target_count"], any_opponent_rank_drop=int(d["down"]),
             any_opponent_rank_maintain=int(d["same"]),
-            head_bump_rank_drop=int(any(int(r["draw_event_id"])==eid and float(r["rank_drop"])>0 for r in head_rows))))
+            head_bump_rank_drop=int(eid in head_drop_draw_ids)))
 
     # Deterministic real examples spanning important branches.
     examples=[]
