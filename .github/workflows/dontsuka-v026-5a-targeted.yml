@@ -1,0 +1,131 @@
+name: ドンツカ v0.26 第5工程A 192件修正後検証
+on:
+  push:
+    branches: [codex/dontsuka-v026-base-20261128]
+    paths: ['.github/workflows/dontsuka-v026-5a-targeted.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+jobs:
+  target:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: b43ee9709280fb31d472e0502c9717b511d10758
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install mahjong==1.4.0
+      - name: Fetch immutable evidence
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p results/targeted
+          gh api /repos/${{ github.repository }}/actions/artifacts/15255583466/zip > /tmp/original.zip
+          gh api /repos/${{ github.repository }}/actions/artifacts/15255997491/zip > /tmp/diagnostic.zip
+          gh api /repos/${{ github.repository }}/actions/artifacts/15237734448/zip > /tmp/2b.zip
+          echo '23207b8e84e0fbb14633204fd297bab36936b1bdc3a12b1bc7e28e4a60a5a95b  /tmp/original.zip' | sha256sum -c
+          echo 'fffd82b4e43c8fb8884369bfc00d5ff282f0e2a293df8f0e9dfe8f2ea4c5e60f  /tmp/diagnostic.zip' | sha256sum -c
+          echo 'a81dd53043b557edbccd1dcc4ab0db798a6c71db68aebbd12532272e600a2781  /tmp/2b.zip' | sha256sum -c
+          curl --fail --location --retry 3 https://github.com/konoui/m-league-game-db/releases/download/20261120-2341-04338cbb/database.zip -o /tmp/db.zip
+          echo 'e2e702402301ae136da71e3f79113f929e291779ff4997c24db5262aaa4ff548  /tmp/db.zip' | sha256sum -c
+          python - <<'PY'
+          import zipfile,shutil
+          with zipfile.ZipFile('/tmp/db.zip') as z:
+              x=[x for x in z.infolist() if x.file_size==873754624]
+              assert len(x)==1
+              with z.open(x[0]) as i,open('/tmp/fixed.sqlite3','wb') as o:shutil.copyfileobj(i,o)
+          PY
+          echo 'edeccd86e100f6ffba88871d7c418a06488d3f515b22cdd2e2b9dced17573e6c  /tmp/fixed.sqlite3' | sha256sum -c
+      - name: Regression tests
+        run: |
+          set -o pipefail
+          python scripts/test_dontsuka_v026_5a.py 2>&1 | tee results/targeted/artificial_tests.txt
+      - name: Verify each original exception, retain unresolved observations
+        env:
+          PYTHONPATH: scripts
+        run: |
+          python - <<'PY'
+          import csv,io,json,zipfile,sqlite3,hashlib
+          from collections import Counter,defaultdict
+          from pathlib import Path
+          from dontsuka_v026_2a_audit import events
+          from dontsuka_v026_2a_replay import Replay
+          from dontsuka_v026_5a import kan_transition,new_kan_furiten,no_physical_wait
+          from dontsuka_v026_5a_core import sh,vector,candidates,evaluate_waits
+          from dontsuka_v026_4b import scoremap
+          out=Path('results/targeted')
+          def readcsv(z,name):return list(csv.DictReader(io.StringIO(z.read(name).decode('utf-8-sig'))))
+          with zipfile.ZipFile('/tmp/original.zip') as z:
+              original=readcsv(z,'unresolved_and_discrepancies.csv')
+              old=json.loads(z.read('manifest.json'))
+              old_rounds={(int(r['kyoku_id']),int(r['player_id'])) for r in readcsv(z,'shoubute_dontsuka_kyoku.csv')}
+          with zipfile.ZipFile('/tmp/diagnostic.zip') as z:
+              diagnostic={int(a['original']['draw_event_id']):a for a in json.loads(z.read('findings.json'))}
+          with zipfile.ZipFile('/tmp/2b.zip') as z:
+              scores={int(r['kyoku_id']):r for r in readcsv(z,'kyoku_comparison.csv')}
+          grouped=defaultdict(dict)
+          for r in original:grouped[int(r['kyoku_id'])][int(r['draw_event_id'])]=r
+          c=sqlite3.connect('file:/tmp/fixed.sqlite3?mode=ro',uri=True);c.row_factory=sqlite3.Row
+          results=[];delta=Counter();new_rounds=set()
+          for ky,targets in sorted(grouped.items()):
+              rp=Replay();ps={};actions=defaultdict(list)
+              for r in c.execute('SELECT ps.*,e.event_order FROM player_state ps JOIN event e ON e.id=ps.event_id WHERE e.kyoku_id=?',(ky,)):
+                  actions[r['event_id']].append(dict(r))
+              winds={r[0]:r[1] for r in c.execute('SELECT player_id,player_wind FROM kyoku_player_result WHERE kyoku_id=?',(ky,))}
+              rw=c.execute('SELECT round FROM kyoku WHERE id=?',(ky,)).fetchone()[0][:2]
+              for ev in events(c,ky):
+                  eid=ev['id'];p=ev.get('actor')
+                  if eid in targets:
+                      r=targets[eid].copy();a=diagnostic[eid];h=rp.hands[p];m=rp.melds[p];n=len(h)+3*len(m);state=ps.get(p)
+                      assert n==a['effective'] and h==a['concealed'] and json.loads(json.dumps(m))==a['melds']
+                      r.update(effective=n,new_status='evaluated',new_shoubute=0,new_furiten='',new_patterns='')
+                      if n!=13:
+                          r.update(new_status='unresolved',new_shoubute='',resolution='observation_limit_invalid_recorded_tile_count')
+                      else:
+                          q=sh(vector(h));waits=candidates(h,m)
+                          if q==0 and waits:
+                              f=new_kan_furiten(rp,ev,p,state,h,m)
+                              w,patterns,ok=evaluate_waits(h,m,winds[p],rw,rp.omote,p in rp.reaches,p in rp.reaches and rp.declarations.get(p,False),f)
+                              assert patterns
+                              r.update(resolution='kan_new_tenpai_reconstructed_furiten',new_shoubute=int(ok),new_furiten=int(f),new_patterns=json.dumps(patterns,ensure_ascii=False))
+                              delta['tenpai_draws']+=1
+                              d=int(r['is_dontsuka']);delta['tenpai_dontsuka']+=d
+                              if ok:
+                                  delta['shoubute_draws']+=1;delta['shoubute_dontsuka']+=d
+                                  if d and (ky,p) not in old_rounds:new_rounds.add((ky,p))
+                          elif q>0 and kan_transition(rp,ev,p,state):
+                              r.update(resolution='kan_stale_tenpai_physical_non_tenpai')
+                          elif q==0 and no_physical_wait(h,m):
+                              r.update(resolution='all_shape_waits_own_four')
+                          else:
+                              raise ValueError((ky,eid,'unresolved unexpected'))
+                      results.append(r)
+                  if ev['type'] not in ('ron','tsumo','ryukyoku'):rp.step(ev)
+                  for x in actions[eid]:ps[x['player_id']]=x
+          assert len(results)==192 and sum(r['new_status']=='unresolved' for r in results)==133
+          for ky,p in new_rounds:
+              s=scores[ky];delta['shoubute_dontsuka_kyoku']+=1
+              delta['kyoku_net_sum']+=scoremap(s['recorded_end_scores'])[p]-scoremap(s['start_scores'])[p]
+              delta['self_wins']+=bool(c.execute("SELECT 1 FROM agari_event a JOIN event e ON e.id=a.event_id WHERE e.kyoku_id=? AND a.actor_player_id=? AND e.type IN ('ron','tsumo')",(ky,p)).fetchone())
+          keys=['tenpai_draws','tenpai_dontsuka','shoubute_draws','shoubute_dontsuka','shoubute_dontsuka_kyoku','self_wins','kyoku_net_sum']
+          provisional={k:old['overall'][k]+delta[k] for k in keys}
+          provisional['mean_kyoku_net']=provisional['kyoku_net_sum']/provisional['shoubute_dontsuka_kyoku']
+          summary=dict(status='targeted only; full-run comparison required',original_cases=len(results),new_status=dict(Counter(r['new_status'] for r in results)),resolution=dict(Counter(r['resolution'] for r in results)),delta={k:delta[k] for k in keys},old_overall={k:old['overall'][k] for k in keys},targeted_projection=provisional,new_rounds=sorted(new_rounds),dora_and_furiten_checked=True)
+          with (out/'targeted_192.csv').open('w',encoding='utf-8-sig',newline='') as f:
+              wr=csv.DictWriter(f,fieldnames=list(dict.fromkeys(k for r in results for k in r)));wr.writeheader();wr.writerows(results)
+          (out/'targeted_summary.json').write_text(json.dumps(summary,ensure_ascii=False,indent=2))
+          print(json.dumps(summary,ensure_ascii=False))
+          (out/'sha256.json').write_text(json.dumps({p.name:hashlib.file_digest(p.open('rb'),'sha256').hexdigest() for p in out.iterdir()},indent=2))
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: dontsuka-v026-5a-targeted-${{ github.run_id }}
+          path: results/targeted/
+          if-no-files-found: error
+          retention-days: 30
