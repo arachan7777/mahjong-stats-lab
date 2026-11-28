@@ -146,7 +146,7 @@ def main():
     # The draw-level denominator includes every player's draw, including draws
     # with no don-tsuka. One basic don-tsuka is one unique draw event.
     names = {int(r[0]): r[1] for r in db.execute("SELECT id,name FROM player")}
-    exposures = defaultdict(int)
+    draw_ids_by_scope = defaultdict(set)
     dimensions = {}
     for r in db.execute("""SELECT d.event_id,d.actor_player_id,ls.start_year,ss.stage,g.date,k.id,g.id
       FROM draw_event d JOIN event e ON e.id=d.event_id JOIN kyoku k ON k.id=e.kyoku_id
@@ -156,7 +156,7 @@ def main():
         dimensions[eid] = dict(player_id=player, season_start_year=season, stage=stage,
                                game_date=date, kyoku_id=ky, game_id=game, player_name=names[player])
         for key in dimension_keys(dimensions[eid]):
-            exposures[(player, *key)] += 1
+            draw_ids_by_scope[(player, *key)].add(eid)
     if len(dimensions) != EXPECTED["all_draws"]:
         raise ValueError("fixed DB draw dimension coverage mismatch")
 
@@ -201,6 +201,7 @@ def main():
     head_down = sum(float(r["rank_drop"]) > 0 for r in head_rows)
     if len(head_rows) != 27578 or head_down != 12931:
         raise ValueError("head-bump unit mismatch")
+    head_by_draw = {int(r["draw_event_id"]): r for r in head_rows}
 
     # Distinct basic-draw unit, kept separate from per-opponent and head-bump units.
     draw_class = {}
@@ -267,11 +268,10 @@ def main():
                     (kind == "season" and str(row["season_start_year"]) == season) or
                     (kind == "stage" and row["stage"] == stage) or
                     (kind == "season_stage" and str(row["season_start_year"]) == season and row["stage"] == stage))
-        draw_ids = [eid for eid, d in dimensions.items() if d["player_id"] == player and in_scope(d)]
-        draw_set = set(draw_ids)
+        draw_set = draw_ids_by_scope.get(key, set())
         own_don = [eid for eid in draw_set if eid in draw_class]
         own_drop_draws = [eid for eid in own_don if draw_class[eid]["down"]]
-        own_opp_rows = [r for r in source if int(r["drawer"]) == player and int(r["draw_event_id"]) in draw_set]
+        own_opp_rows = [r for eid in draw_set for r in by_draw.get(eid, ())]
         opp_drop = sum(float(r["rank_drop"]) > 0 for r in own_opp_rows)
         opp_same = sum(float(r["rank_drop"]) == 0 for r in own_opp_rows)
         scope_details = [r for r in kyoku_details if r["player_id"] == player and in_scope(r)]
@@ -279,8 +279,7 @@ def main():
         maintenance = sum(int(r["rank_maintained_or_improved"]) for r in scope_details)
         avoided = sum(int(r["ron_avoided"]) for r in scope_details)
         actual_ron_count = sum(int(r["actual_ron"]) for r in scope_details)
-        scope_head_draws = [r for r in head_rows if int(r["drawer"]) == player and
-            int(r["draw_event_id"]) in draw_set]
+        scope_head_draws = [head_by_draw[eid] for eid in draw_set if eid in head_by_draw]
         scope_head_drop = sum(float(r["rank_drop"]) > 0 for r in scope_head_draws)
         widths = Counter(float(r["rank_drop"]) for r in own_opp_rows if float(r["rank_drop"]) > 0)
         per_opponent = len(own_opp_rows)
