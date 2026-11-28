@@ -128,7 +128,7 @@ def main():
         raise ValueError("Stage 2B kyoku row count mismatch")
     for r in stage2_kyoku:
         ky = int(r["kyoku_id"])
-        if r["match"] != "True" or r["error"]:
+        if r["match"] not in ("1", "True", "true") or r["error"]:
             raise ValueError(f"approved Stage 2B kyoku comparison is not clean: {ky}")
         replayed = {int(k): int(v) for k, v in json.loads(r["replayed_end_scores"]).items()}
         recorded = {int(k): int(v) for k, v in json.loads(r["recorded_end_scores"]).items()}
