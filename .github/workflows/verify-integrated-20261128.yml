@@ -1,0 +1,33 @@
+name: 麻雀スタッツ 20261128 2068+16 統合独立監査
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'integration-run-20261128.txt'
+
+permissions:
+  contents: read
+
+jobs:
+  integrate-verify:
+    name: 旧版と16試合差分を統合し全31テーブル完全照合
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    steps:
+      - name: 既存リポジトリ取得
+        uses: actions/checkout@v4
+      - name: Python準備
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: 2版取得とSQLite統合および全テーブル独立比較
+        run: python scripts/verify_integrated_20261128.py --output integrated-audit-20261128
+      - name: 成功結果だけ保存
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: integrated-master-audit-20261128
+          path: integrated-audit-20261128/integrated-master-audit.json
+          if-no-files-found: error
+          retention-days: 30
