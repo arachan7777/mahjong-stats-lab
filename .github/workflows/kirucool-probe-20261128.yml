@@ -1,0 +1,138 @@
+name: キルクール探索集計 20261128
+on:
+  push:
+    paths:
+      - '.github/workflows/kirucool-probe-20261128.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: 固定版を検証して探索集計
+        run: |
+          PYTHONPATH=scripts python -u - <<'PY'
+          import sqlite3, json, hashlib, csv
+          from pathlib import Path
+          from collections import Counter, defaultdict
+          from scripts.export_weekly_delta_20261128 import source_release, hash_file
+          from scripts.check_latest_db import download_asset, extract_sqlite
+          tag='20261128-0102-1b6bd367'
+          release,asset=source_release(tag)
+          assert release['tag_name']==tag
+          z=Path('source.zip'); db=Path('canonical.sqlite3')
+          sha=download_asset(asset['browser_download_url'],asset['size'],z)
+          assert not asset.get('digest') or asset['digest']=='sha256:'+sha
+          extract_sqlite(z,db)
+          assert hash_file(db)=='105445b19f7ab829457b47dea49f24b97bc265eaf8aabb987da2379ba7f5c8cf'
+          c=sqlite3.connect(db.resolve().as_uri()+'?mode=ro',uri=True)
+          assert c.execute('PRAGMA quick_check').fetchone()[0]=='ok'
+          counts={t:c.execute('SELECT COUNT(*) FROM '+t).fetchone()[0] for t in ('game','kyoku','event')}
+          assert counts=={'game':2084,'kyoku':25437,'event':2779703},counts
+          assert c.execute('SELECT MAX(date) FROM game').fetchone()[0]=='2026-11-27'
+          print('SOURCE',counts,flush=True)
+          def norm(t):
+              assert len(t)==2 and t[1] in 'mpsz' and t[0] in '0123456789',t
+              return '5'+t[1] if t[0]=='0' else t
+          q="""SELECT e.kyoku_id,e.event_order,e.id,e.type,
+          coalesce(d.actor_player_id,s.actor_player_id),coalesce(d.tile,s.tile),
+          i.dora_type,i.dora_tile
+          FROM event e
+          LEFT JOIN draw_event d ON d.event_id=e.id
+          LEFT JOIN discard_event s ON s.event_id=e.id
+          LEFT JOIN dora_indicator_event i ON i.event_id=e.id
+          WHERE e.type IN ('draw','discard','dora_indicator')
+          ORDER BY e.kyoku_id,e.event_order,e.id"""
+          totals=defaultdict(Counter); by_player=defaultdict(Counter); by_tile=defaultdict(Counter)
+          names=dict(c.execute('SELECT id,name FROM player'))
+          current=None; pending=defaultdict(list); draws=Counter(); indicators=[]; prev=defaultdict(lambda:None)
+          audit=Counter()
+          def finish(p,rec):
+              tile,groups,turn,observed,match,exact,streak=rec
+              n=len(observed)
+              for g in groups:
+                  for b in (totals[g],by_player[(p,g)],by_tile[(norm(tile),g)]):
+                      b['discards']+=1
+                      b['observed_'+str(n)]+=1
+                      for k in range(n):
+                          i=k+1
+                          b['trials_'+str(i)]+=1
+                          b['kind_'+str(i)]+=match[k]
+                          b['exact_'+str(i)]+=exact[k]
+                      if n:
+                          b['any_trials']+=1
+                          b['any_kind']+=any(match)
+                          b['any_exact']+=any(exact)
+                          if n==3:
+                              b['full_trials']+=1
+                              b['full_kind']+=any(match)
+                              b['full_exact']+=any(exact)
+                          b['window_'+str(n)+'_kind']+=any(match)
+                          b['window_'+str(n)+'_exact']+=any(exact)
+                          if streak:
+                              b['repeat_trials']+=1
+                              b['repeat_kind']+=match[0]
+                              b['repeat_exact']+=exact[0]
+          def flush():
+              for p,recs in pending.items():
+                  for rec in recs: finish(p,rec)
+              pending.clear()
+          for k,order,eid,typ,p,t,dt,dora in c.execute(q):
+              if k!=current:
+                  flush();current=k;draws.clear();indicators=[];prev.clear();audit['kyoku']+=1
+              if typ=='dora_indicator':
+                  if dt=='omote': indicators.append(norm(dora))
+                  continue
+              nt=norm(t)
+              if typ=='draw':
+                  audit['draw']+=1;draws[p]+=1
+                  for rec in pending[p]:
+                      rec[3].append(t);rec[4].append(int(norm(rec[0])==nt));rec[5].append(int(rec[0]==t))
+                  prev[p]=('draw',t, bool(pending[p] and pending[p][-1][4] and len(pending[p][-1][4])==1 and pending[p][-1][4][0]))
+                  while pending[p] and len(pending[p][0][3])==3: finish(p,pending[p].pop(0))
+              else:
+                  audit['discard']+=1
+                  assert indicators,('no public dora at discard',k,order)
+                  flags=(nt==indicators[0],t[0]=='0',nt in indicators[1:])
+                  groups=['all']
+                  groups.append('any_dora' if any(flags) else 'non_dora')
+                  groups.extend(g for g,f in zip(('normal_dora','red_dora','kan_dora'),flags) if f)
+                  groups.append('flags_'+''.join(str(int(f)) for f in flags))
+                  last=prev[p]
+                  streak=bool(last and last[0]=='draw' and last[1]==t and last[2])
+                  pending[p].append([t,groups,draws[p],[],[],[],streak])
+                  prev[p]=('discard',t,False)
+          flush()
+          assert audit['kyoku']==25437
+          assert totals['all']['discards']==audit['discard']
+          for key in ('discards','trials_1','trials_2','trials_3','kind_1','kind_2','kind_3','exact_1','exact_2','exact_3','any_trials','any_kind','full_trials','full_kind'):
+              assert totals['all'][key]==totals['any_dora'][key]+totals['non_dora'][key],key
+          def row(b):
+              r=dict(b)
+              for i in range(1,4):
+                  for typ in ('kind','exact'):
+                      n=b['trials_'+str(i)];r[typ+'_pct_'+str(i)]=round(100*b[typ+'_'+str(i)]/n,6) if n else None
+              for w in ('any','full','repeat'):
+                  for typ in ('kind','exact'):
+                      n=b[w+'_trials'];r[w+'_'+typ+'_pct']=round(100*b[w+'_'+typ]/n,6) if n else None
+              return r
+          result={'tag':tag,'counts':counts,'audit':dict(audit),'definitions':{'kind':'34 tile types, red five normalized','exact':'37 types, red five distinct','categories':'flags at discard, normal and kan and red overlap; any_dora versus non_dora disjoint','full':'only three draws observed','any':'at least one draw observed, exposure varies','repeat':'same exact tile discarded immediately after a kind match on first draw; next draw outcome'},'overall':{g:row(b) for g,b in sorted(totals.items())}}
+          out=Path('results');out.mkdir(exist_ok=True)
+          (out/'kirucool_summary.json').write_text(json.dumps(result,ensure_ascii=False,indent=2))
+          for name,data in [('players',[{'player_id':p,'name':names[p],'category':g,**row(b)} for (p,g),b in by_player.items()]),('tiles',[{'tile':t,'category':g,**row(b)} for (t,g),b in by_tile.items()])]:
+              fields=list(dict.fromkeys(k for r in data for k in r))
+              with (out/f'kirucool_{name}.csv').open('w',encoding='utf-8-sig',newline='') as f:
+                  w=csv.DictWriter(f,fieldnames=fields);w.writeheader();w.writerows(data)
+          print('KIRUCOOL_RESULT',json.dumps(result,ensure_ascii=False),flush=True)
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: kirucool-probe-20261128
+          path: results/
+          if-no-files-found: error
