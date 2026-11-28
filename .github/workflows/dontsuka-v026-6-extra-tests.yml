@@ -1,0 +1,43 @@
+name: ドンツカ総合研究 v0.26 第6工程追加人工テスト
+on:
+  push:
+    branches: [codex/dontsuka-v026-base-20261128]
+    paths:
+      - '.github/workflows/dontsuka-v026-6-extra-tests.yml'
+      - 'research/dontsuka_v026_6/test_full_event_cases.py'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install mahjong==1.4.0
+      - name: Full event artificial tests
+        shell: bash
+        run: |
+          set -o pipefail
+          mkdir -p results/extra
+          python research/dontsuka_v026_6/test_full_event_cases.py 2>&1 | tee results/extra/test.log
+      - name: Manifest after log close
+        if: always()
+        run: |
+          mkdir -p results/extra
+          cp research/dontsuka_v026_6/test_full_event_cases.py .github/workflows/dontsuka-v026-6-extra-tests.yml results/extra/
+          python - <<'PY'
+          import hashlib,json
+          from pathlib import Path
+          p=Path('results/extra')
+          (p/'manifest.json').write_text(json.dumps({f.name:hashlib.file_digest(f.open('rb'),'sha256').hexdigest() for f in p.iterdir() if f.is_file() and f.name!='manifest.json'},indent=2))
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: dontsuka-v026-6-extra-tests-${{ github.run_id }}
+          path: results/extra/
+          retention-days: 30
