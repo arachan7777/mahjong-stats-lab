@@ -1,0 +1,82 @@
+name: ドンツカ総合研究 v0.26 第3工程A
+on:
+  push:
+    branches: [codex/dontsuka-v026-base-20261128]
+    paths:
+      - '.github/workflows/dontsuka-v026-3a.yml'
+      - 'scripts/dontsuka_v026_3a.py'
+      - 'scripts/test_dontsuka_v026_3a.py'
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Prepare
+        run: |
+          mkdir -p results/dontsuka_v026_3a
+          pip install mahjong==1.4.0
+          pip freeze > results/dontsuka_v026_3a/requirements-resolved.txt
+      - name: Artificial tests
+        run: |
+          set -o pipefail
+          python scripts/test_dontsuka_v026_3a.py 2>&1 | tee results/dontsuka_v026_3a/artificial_tests.txt
+      - name: Fetch approved stage 2 evidence
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh api /repos/${{ github.repository }}/actions/artifacts/15236588408/zip > /tmp/approved2a.zip
+          gh api /repos/${{ github.repository }}/actions/artifacts/15237734448/zip > /tmp/approved2b.zip
+          echo '77a165910c731a63a52d3eda966050dddf164cd12ab0b0130979c9ce39e58a17  /tmp/approved2a.zip' | sha256sum --check
+          echo 'a81dd53043b557edbccd1dcc4ab0db798a6c71db68aebbd12532272e600a2781  /tmp/approved2b.zip' | sha256sum --check
+      - name: Retrieve verified fixed DB
+        run: |
+          set -euo pipefail
+          curl --fail --location --retry 3 https://github.com/konoui/m-league-game-db/releases/download/20261120-2341-04338cbb/database.zip -o /tmp/mahjong-database.zip
+          echo 'e2e702402301ae136da71e3f79113f929e291779ff4997c24db5262aaa4ff548  /tmp/mahjong-database.zip' | sha256sum --check
+          python - <<'PY'
+          import shutil, zipfile
+          from pathlib import Path
+          with zipfile.ZipFile('/tmp/mahjong-database.zip') as z:
+              candidates=[x for x in z.infolist() if not x.is_dir() and Path(x.filename).suffix.lower() in {'.sqlite3','.sqlite','.db','.db3'}]
+              if len(candidates)!=1 or candidates[0].file_size!=873754624:
+                  raise RuntimeError('Unexpected database archive')
+              with z.open(candidates[0]) as src, open('/tmp/mahjong-fixed.sqlite3','wb') as dst:
+                  shutil.copyfileobj(src,dst)
+          PY
+          echo 'edeccd86e100f6ffba88871d7c418a06488d3f515b22cdd2e2b9dced17573e6c  /tmp/mahjong-fixed.sqlite3' | sha256sum --check
+      - name: Hypothetical ron audit
+        run: |
+          set -o pipefail
+          python -u scripts/dontsuka_v026_3a.py /tmp/mahjong-fixed.sqlite3 /tmp/approved2a.zip /tmp/approved2b.zip results/dontsuka_v026_3a 2>&1 | tee results/dontsuka_v026_3a/audit.log
+      - name: Finalize manifest after logs close
+        if: always()
+        run: |
+          python - <<'PY'
+          import hashlib, json, os
+          from pathlib import Path
+          out=Path('results/dontsuka_v026_3a');out.mkdir(parents=True,exist_ok=True)
+          p=out/'manifest.json'
+          m=json.loads(p.read_text()) if p.exists() else {'scope':'3A only','status':'incomplete'}
+          m['commit']=os.environ['GITHUB_SHA']
+          m['run_id']=os.environ['GITHUB_RUN_ID']
+          m['run_attempt']=os.environ['GITHUB_RUN_ATTEMPT']
+          m['outputs']={f.name:hashlib.file_digest(f.open('rb'),'sha256').hexdigest() for f in sorted(out.iterdir()) if f.is_file() and f!=p}
+          p.write_text(json.dumps(m,ensure_ascii=False,indent=2)+'\n',encoding='utf-8')
+          PY
+      - name: Preserve stage 3A evidence only
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dontsuka-v026-3a-${{ github.run_id }}-${{ github.run_attempt }}
+          path: results/dontsuka_v026_3a/
+          if-no-files-found: error
+          retention-days: 30
