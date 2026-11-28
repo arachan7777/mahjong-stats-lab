@@ -1,0 +1,2 @@
+Trigger standalone pinned weekly delta export for 2026-11-21 through 2026-11-27.
+Source database and previously confirmed reference remain untouched.
