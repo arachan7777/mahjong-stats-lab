@@ -33,10 +33,11 @@ def make(mode):
     hands={1:split("1m 2m 3m 4p 5p 6p 7s 8s 9s 3z 3z 2s 9m"),
            2:split("1m 2m 3m 4m 5m 6m 7m 8m 9m 1p 1p 2s 3s"),
            3:split("1p 2p 3p 4p 5p 6p 7p 8p 9p 2z 2z 6s 7s")}
+    if mode=="damaten":hands[1]=split("1m 2m 3m 4p 5p 6p 2s 3s 4s 3z 3z 1s 9m")
     turns=[(1,"1s","9m"),(2,"7z","7z"),(3,"6z","6z"),(4,"5z","5z")]
     if mode=="declaration":turns += [(1,"5s","5s")]
     else:
-        turns += [(1,"5s","3z")]
+        turns += [(1,"5s","2s" if mode=="damaten" else "3z")]
         if mode=="wait": turns += [(2,"2s","3s")]
         elif mode=="collapse":turns += [(2,"7z","3s")]
         elif mode=="permanent":turns += [(2,"4s","4s")]
@@ -44,6 +45,7 @@ def make(mode):
         turns += [(3,"6z","6z"),(4,"4s" if mode=="temporary" else "5z","4s" if mode=="temporary" else "5z"),(1,"4z","4z")]
         if mode=="collapse":turns += [(2,"3s","7z")]
         else:turns += [(2,"1z","1z")]
+        turns += [(3,"6z","6z"),(4,"5z","5z"),(1,"4z","5s")]
     # Full physical tile pool; reserve all draws before assigning fourth hand.
     pool=Counter({t:4 for t in TYPES})
     for s in "mps":pool["5"+s]=3;pool["0"+s]=1
@@ -60,6 +62,7 @@ def make(mode):
     CREATE TABLE haipai_event(event_id,actor_player_id,hand);
     CREATE TABLE draw_event(event_id,actor_player_id,tile,wall_remaining_count,is_rinshan);
     CREATE TABLE discard_event(event_id,actor_player_id,tile,is_reach_declaration);
+    CREATE TABLE agari_event(event_id,actor_player_id,target_player_id,agari_tile);
     CREATE TABLE player_state(event_id,player_id,shanten_count);
     CREATE TABLE player_tenpai_state(event_id,player_id,is_furiten);
     CREATE TABLE tenpai_agari_matrix(event_id,player_id,waiting_tile,is_ron_agari);
@@ -83,6 +86,8 @@ def make(mode):
             for q,hh in raw.items():
                 if q!=p and q!=winner and normal(t) in shape(hh) and not shape(hh)&river[q] and q not in temp and legal(hh,t,q):
                     temp.add(q)
+        elif k=="ron":
+            db.execute("INSERT INTO agari_event VALUES(?,?,?,?)",(eid,3,1,"5s"))
         for q,hh in raw.items():
             db.execute("INSERT INTO player_state VALUES(?,?,?)",(eid,q,sh(hh)))
             if len(hh)==13 and sh(hh)==0:
@@ -93,11 +98,10 @@ def make(mode):
     for p,h in hands.items():add("haipai",p,h=h)
     for i,(p,d,x) in enumerate(turns):
         add("draw",p,d,tag="draw"+str(i))
-        add("discard",p,x,decl=mode=="declaration" and i==4,tag="discard"+str(i),winner=3 if mode=="declaration" and i==4 else None)
-    # Non-winning sequences end at a later artificial boundary, not an alleged exhaustive draw.
-    if mode=="declaration":add("ron",tag="terminal")
-    end=eid+1
-    origins=[dict(draw_event_id=origin_ids[t],target=q,rank_drop=drop,start_event_order=origin_ids[t],end_event_order=end,tile_type=t) for t,q,drop in [("1s",2,1),("5s",3,0)]]
+        add("discard",p,x,decl=mode=="declaration" and i==4,tag="discard"+str(i),winner=3 if i==len(turns)-1 else None)
+    tags["final_discard"]=eid
+    add("ron",tag="terminal")
+    origins=[dict(draw_event_id=origin_ids[t],target=q,rank_drop=drop,start_event_order=origin_ids[t],end_event_order=eid if t=="1s" else tags["final_discard"],tile_type=t) for t,q,drop in [("1s",2,1),("5s",3,0)]]
     return db,tags,origins
 
 def run(mode):
@@ -110,18 +114,25 @@ def run(mode):
             ds={(int(o["target"]),o["tile_type"]):rs.detail(int(o["target"]),o["tile_type"]) for o in origins if active_at(o,i,side)}
             return state(origins,i,{k:d["legal"] for k,d in ds.items()},side),ds
         s,ds=current("before");pre[i]=s
-        if mode=="declaration" and i==tags["discard4"]:
-            # Verify declaration hand, winning target and actual score movement from reconstructed tiles.
+        if i==tags["final_discard"]:
+            # Verify source hand and actual score movement from reconstructed tiles.
             h,m=rs.rp.hands[1],rs.rp.melds[1]
-            assert not m and sh([t for j,t in enumerate(h) if j!=len(h)-1])==0
+            if mode=="declaration":assert not m and sh(h[:-1])==0
             points=legal(rs.rp.hands[3],"5s",3);assert points
             before={1:40000,2:35000,3:15000,4:10000}
             assert ranks(before)[1]==1
             after=dict(before);after[1]-=points;after[3]+=points
             link=dict(origins[1],relation="immediate",same_target=1)
-            decision=ron_result(s,[link],3,ranks(before)[1],ranks(after)[1],"discard",True,bool(e["declaration"]),1 in rs.rp.reaches,False,True)
+            link["relation"]="immediate" if mode=="declaration" else "subsequent"
+            decision=ron_result(s,[link],3,ranks(before)[1],ranks(after)[1],"discard",mode=="declaration",bool(e["declaration"]),1 in rs.rp.reaches,False,rs.last_stable[1]==0)
+        if e["type"]=="ron":
+            win=db.execute("SELECT * FROM agari_event WHERE event_id=?",(i,)).fetchone()
+            h,m,flags=rs.rp.winning(win["actor_player_id"],win["agari_tile"],False,win["target_player_id"])
+            assert evaluate(h,m,win["agari_tile"],flags,WINDS[3],"1z",[],[])["points"]>0
         rs.step(e)
         s,ds=current("after");post[i]=s;details[i]=ds
+        for o in origins:
+            if o["start_event_order"]<=i<o["end_event_order"]:assert any(normal(t)==o["tile_type"] for t in rs.rp.hands[1])
         changes[i]=transition(prev,s,ever);ever|=coexists(s);prev=s
     db.close()
     return tags,post,details,changes,decision
@@ -149,6 +160,12 @@ class PhysicalReplay(unittest.TestCase):
         g,s,d,c,_=run("permanent")
         self.assertEqual(d[g["discard5"]][(2,"1s")]["reason"],"furiten")
         self.assertEqual(d[g["discard9"]][(2,"1s")]["reason"],"furiten")
+    def test_damaten_tedashi_ron(self):
+        g,s,d,c,r=run("damaten")
+        self.assertEqual((r["tolerated"],r["sage"],r["reason"]),(1,1,"damaten_tedashi"))
+    def test_closed_nontenpai_tedashi_ron(self):
+        g,s,d,c,r=run("collapse")
+        self.assertEqual((r["tolerated"],r["sage"],r["reason"]),(1,1,"closed_selected_tedashi"))
     def test_declaration_ron(self):
         g,s,d,c,r=run("declaration")
         self.assertEqual((r["tolerated"],r["sage"],r["reason"]),(1,1,"reach_declaration"))

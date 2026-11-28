@@ -69,6 +69,15 @@ jobs:
         run: |
           set -o pipefail
           python -u scripts/dontsuka_v026_4b.py /tmp/mahjong-fixed.sqlite3 /tmp/approved2a.zip /tmp/approved2b.zip /tmp/approved3a.zip /tmp/approved3b.zip /tmp/approved4a.zip results/dontsuka_v026_4b 2>&1 | tee results/dontsuka_v026_4b/audit.log
+      - name: Independently compare final and provisional decisions
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh api /repos/${{ github.repository }}/actions/artifacts/15254227107/zip > /tmp/provisional4b.zip
+          echo '5fad467465dc686c6c2e831cd9b870debe551f6de22302194b04cbdbb63a392a  /tmp/provisional4b.zip' | sha256sum --check
+          python scripts/verify_dontsuka_v026_4b_final.py /tmp/provisional4b.zip results/dontsuka_v026_4b
       - name: Finalize manifest after logs close
         if: always()
         run: |
