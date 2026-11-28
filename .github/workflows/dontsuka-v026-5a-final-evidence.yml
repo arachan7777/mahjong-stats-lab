@@ -1,0 +1,67 @@
+name: ドンツカ v0.26 第5工程A 最終観測制約確認
+on:
+  push:
+    branches: [codex/dontsuka-v026-base-20261128]
+    paths: ['.github/workflows/dontsuka-v026-5a-final-evidence.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  evidence:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Retrieve immutable DB
+        run: |
+          set -euo pipefail
+          mkdir -p results/5a_final_evidence
+          curl --fail --location --retry 3 https://github.com/konoui/m-league-game-db/releases/download/20261120-2341-04338cbb/database.zip -o /tmp/db.zip
+          echo 'e2e702402301ae136da71e3f79113f929e291779ff4997c24db5262aaa4ff548  /tmp/db.zip' | sha256sum -c
+          python - <<'PY'
+          import zipfile,shutil
+          with zipfile.ZipFile('/tmp/db.zip') as z:
+              x=[x for x in z.infolist() if x.file_size==873754624]
+              assert len(x)==1
+              with z.open(x[0]) as i,open('/tmp/fixed.sqlite3','wb') as o:shutil.copyfileobj(i,o)
+          PY
+          echo 'edeccd86e100f6ffba88871d7c418a06488d3f515b22cdd2e2b9dced17573e6c  /tmp/fixed.sqlite3' | sha256sum -c
+      - name: Extract independent records only for eleven affected rounds
+        run: |
+          python - <<'PY'
+          import sqlite3,json,hashlib
+          from pathlib import Path
+          c=sqlite3.connect('file:/tmp/fixed.sqlite3?mode=ro',uri=True);c.row_factory=sqlite3.Row
+          c.execute('PRAGMA query_only=ON')
+          out=Path('results/5a_final_evidence')
+          ids=[8436,10197,17277,17466,20477,20794,20896,23004,23105,24079,24836]
+          tables={}
+          for t,sql in c.execute("select name,sql from sqlite_master where type='table'"):
+              cols=[r[1] for r in c.execute('pragma table_info("'+t+'")')]
+              tables[t]={'columns':cols,'sql':sql}
+          data={}
+          for k in ids:
+              rounds={}
+              for t,info in tables.items():
+                  cols=info['columns']; q='"'+t+'"'
+                  if 'kyoku_id' in cols: query=f'SELECT * FROM {q} WHERE kyoku_id=?'
+                  elif 'event_id' in cols:query=f'SELECT * FROM {q} WHERE event_id IN (SELECT id FROM event WHERE kyoku_id=?)'
+                  elif t=='kyoku':query='SELECT * FROM kyoku WHERE id=?'
+                  elif 'agari_event_id' in cols:query=f'SELECT * FROM {q} WHERE agari_event_id IN (SELECT id FROM event WHERE kyoku_id=?)'
+                  else:continue
+                  rows=[dict(r) for r in c.execute(query,(k,))]
+                  if rows:rounds[t]=rows
+              data[str(k)]=rounds
+          players=[dict(r) for r in c.execute('SELECT * FROM player')]
+          (out/'tables.json').write_text(json.dumps(tables,ensure_ascii=False,indent=2,default=str))
+          (out/'round_records.json').write_text(json.dumps(data,ensure_ascii=False,default=str))
+          (out/'players.json').write_text(json.dumps(players,ensure_ascii=False,default=str))
+          (out/'sha256.json').write_text(json.dumps({p.name:hashlib.file_digest(p.open('rb'),'sha256').hexdigest() for p in out.iterdir()},indent=2))
+          print('tables',list(tables),'rounds',len(data),'row counts',{k:{t:len(r) for t,r in v.items()} for k,v in data.items()})
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dontsuka-v026-5a-final-evidence-${{ github.run_id }}
+          path: results/5a_final_evidence/
+          if-no-files-found: error
+          retention-days: 30
