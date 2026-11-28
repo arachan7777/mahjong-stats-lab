@@ -1,0 +1,69 @@
+name: Stage 7 final independent history audit and concrete event tests
+on:
+  push:
+    branches: [codex/dontsuka-v026-base-20261128]
+    paths:
+      - '.github/workflows/dontsuka-v026-7-final-audit.yml'
+      - 'research/dontsuka_v026_7/verify_db_history_recovered.py'
+      - 'research/dontsuka_v026_7/test_full_stage7_events.py'
+permissions:
+  contents: read
+  actions: read
+jobs:
+  concrete-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install mahjong==1.4.0
+      - name: Concrete hand and event fixtures
+        run: |
+          mkdir -p results/tests
+          set -o pipefail
+          python -u research/dontsuka_v026_7/test_full_stage7_events.py 2>&1 | tee results/tests/run.log
+      - name: Preserve tests and hashes
+        if: always()
+        run: |
+          cp research/dontsuka_v026_7/test_full_stage7_events.py results/tests/
+          cd results/tests
+          sha256sum run.log test_full_stage7_events.py > sha256.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: dontsuka-v026-7-concrete-tests-${{ github.run_id }}
+          path: results/tests
+  history:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install mahjong==1.4.0
+      - name: Pinned read-only database
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash scripts/dontsuka_v026_5b_prepare.sh
+      - name: Independently verify corrected artifact with SQL
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p results/history
+          gh api repos/arachan7777/mahjong-stats-lab/actions/artifacts/15261115262/zip > /tmp/stage7-recovered.zip
+          echo 'dc307f93e46ddd6eaf15d0cfcc37d3ae0417963d0f2ceb8541e02c6648f43143  /tmp/stage7-recovered.zip' | sha256sum -c
+          set -o pipefail
+          python -u research/dontsuka_v026_7/verify_db_history_recovered.py /tmp/mahjong-fixed.sqlite3 /tmp/stage7-recovered.zip results/history dc307f93e46ddd6eaf15d0cfcc37d3ae0417963d0f2ceb8541e02c6648f43143 2>&1 | tee results/history/run.log
+      - name: Finalize manifest after log closure
+        if: always()
+        run: |
+          mkdir -p results/history
+          cp research/dontsuka_v026_7/verify_db_history_recovered.py results/history/
+          cd results/history
+          find . -type f ! -name sha256.txt -print0 | sort -z | xargs -0 sha256sum > sha256.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: dontsuka-v026-7-final-history-${{ github.run_id }}
+          path: results/history
