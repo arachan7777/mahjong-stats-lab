@@ -2,6 +2,8 @@
 import unittest
 from dontsuka_v026_5a_core import evaluate_waits,qualifies,candidates
 from dontsuka_v026_2a_audit import score
+from dontsuka_v026_5a import kan_transition,new_kan_furiten,no_physical_wait
+from dontsuka_v026_2a_replay import Replay
 def hand(s):return s.split()
 def evaluate(s,m=(),om=(),reached=False,double=False,furiten=False,possible=True):
     return evaluate_waits(hand(s),list(m),"2z","1z",list(om),reached,double,furiten,possible)
@@ -67,4 +69,39 @@ class Test(unittest.TestCase):
         h=hand("2m 3m 4m 3p 4p 5p 4s 5s 6s 2p 2p 6s 7s")
         self.assertTrue(candidates(h,[]))
         with self.assertRaises(ValueError):candidates(h+["8s"],[])
+class TransitionTests(unittest.TestCase):
+    def test_kan_new_tenpai_and_discard_furiten(self):
+        p=47; rp=Replay()
+        rp.last_action=("ankan",p,"1p")
+        rp.last_draw[p]=dict(event_order=20)
+        rp.trace=[dict(type="discard",actor=p,tile="3m",event_order=10),
+                  dict(type="draw",actor=p,event_order=20),
+                  dict(type="ankan",actor=p,event_order=21),
+                  dict(type="dora_indicator",event_order=22)]
+        state=dict(shanten_count=1,event_order=10); ev=dict(rinshan=1,event_order=23)
+        h=hand("2m 8m 6p 6p 6m 3m 7m 4m 3m 1m")
+        m=[("ankan",hand("1p 1p 1p 1p"))]
+        self.assertTrue(kan_transition(rp,ev,p,state))
+        w=candidates(h,m);self.assertTrue(w)
+        self.assertEqual(new_kan_furiten(rp,ev,p,state,h,m), "3m" in w)
+        rp.trace[0]["tile"]=w[0];self.assertTrue(new_kan_furiten(rp,ev,p,state,h,m))
+        rp.trace[0]["tile"]="7z";self.assertFalse(new_kan_furiten(rp,ev,p,state,h,m))
+        rp.reaches.add(p)
+        with self.assertRaises(ValueError):new_kan_furiten(rp,ev,p,state,h,m)
+    def test_kan_stale_and_intervening(self):
+        rp=Replay();rp.last_action=("ankan",15,"5s")
+        rp.trace=[dict(type="ankan",actor=15,event_order=21),dict(type="dora_indicator",event_order=22)]
+        self.assertTrue(kan_transition(rp,dict(rinshan=1),15,dict(shanten_count=0,event_order=10)))
+        self.assertFalse(kan_transition(rp,dict(rinshan=0),15,dict(shanten_count=0,event_order=10)))
+        self.assertFalse(kan_transition(rp,dict(rinshan=1),15,dict(shanten_count=0,event_order=21)))
+        rp.trace.append(dict(type="discard",actor=99,event_order=23))
+        self.assertFalse(kan_transition(rp,dict(rinshan=1),15,dict(shanten_count=0,event_order=10)))
+    def test_fifth_tile_impossible(self):
+        h=hand("8m 9m 7p 9p 8p 7s 7m")
+        m=[("chi",hand("0s 3s 4s")),("pon",hand("7s 7s 7s"))]
+        self.assertTrue(no_physical_wait(h,m));self.assertFalse(candidates(h,m))
+        self.assertFalse(no_physical_wait(h,[m[0],("pon",hand("6s 6s 6s"))]))
+    def test_invalid_count_not_fabricated(self):
+        for n in (12,14):
+            with self.assertRaises(ValueError):candidates(["1m"]*n,[])
 if __name__=="__main__":unittest.main(verbosity=2)

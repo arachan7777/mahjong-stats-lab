@@ -3,8 +3,8 @@ import argparse,csv,gzip,io,json,os,traceback
 from collections import Counter,defaultdict
 from pathlib import Path
 from dontsuka_v026_2a_audit import events
-from dontsuka_v026_2a_replay import Replay
-from dontsuka_v026_5a_core import evaluate_waits,sh,vector,candidates
+from dontsuka_v026_2a_replay import Replay,normal
+from dontsuka_v026_5a_core import evaluate_waits,sh,vector,candidates,shape
 from dontsuka_v026_extract import connect_readonly,verify_database,sha256_file
 from dontsuka_v026_2b_replay import RELEASE,DB_SHA
 from dontsuka_v026_3b import verified_zip,read_csv_zip,write_csv,rates,dimension_keys
@@ -13,6 +13,37 @@ STAGE4B_SHA="bae9d9363246c7b77a809ad36538a5a6616a08fc8fbdd9badfb1503ec25c64d8"
 def js(x):return json.dumps(x,ensure_ascii=False,sort_keys=True,separators=(",",":"))
 def emit(out,name,rows,fields):
     write_csv(out/name,rows,list(dict.fromkeys(fields+[k for r in rows for k in r])))
+def kan_transition(rp,ev,p,state):
+    # The latest actor action must be a kan; only dora indicators may follow.
+    if not ev.get("rinshan") or not state or rp.last_action is None or rp.last_action[:2] not in (("ankan",p),("shominkan",p),("daiminkan",p)):
+        return False
+    for prior in reversed(rp.trace):
+        if prior["type"]=="dora_indicator":continue
+        return prior["type"] in ("ankan","shominkan","daiminkan") and prior.get("actor")==p and state["event_order"]<prior["event_order"]
+    return False
+
+def new_kan_furiten(rp,ev,p,state,h,m):
+    # New tenpai after own draw/kan: temporary furiten cleared by own preceding draw.
+    # No intervening opponent discard is allowed. Accepted riichi is not inferred here.
+    if not kan_transition(rp,ev,p,state) or state["shanten_count"]==0 or p in rp.reaches:
+        raise ValueError("missing current tenpai/furiten evidence")
+    kan=next(x for x in reversed(rp.trace) if x["type"]!="dora_indicator")
+    previous=rp.last_draw.get(p)
+    if not previous or previous["event_order"]>=kan["event_order"]:
+        raise ValueError("no verified own draw before kan")
+    # Ensure only own kan and indicators intervene after last own draw (including no opponent discard).
+    if any(x["type"] not in ("ankan","shominkan","dora_indicator") or (x["type"]!="dora_indicator" and x.get("actor")!=p) for x in rp.trace if previous["event_order"]<x["event_order"]<=kan["event_order"]):
+        raise ValueError("intervening event prevents furiten reconstruction")
+    waits={normal(t) for t in candidates(h,m)}
+    return any(x["type"]=="discard" and x.get("actor")==p and normal(x["tile"]) in waits for x in rp.trace)
+
+def no_physical_wait(h,m):
+    # Shape-only shanten may be zero even if every completion would require
+    # a fifth copy of a tile already held in the concealed hand and melds.
+    own=Counter(normal(t) for t in h+[t for _,b in m for t in b])
+    theoretical=shape(vector(h))
+    return bool(theoretical) and all(own[t]>=4 for t in theoretical)
+
 def main():
     ap=argparse.ArgumentParser()
     for n in ("db","stage2a","stage2b","stage3a","stage3b","stage4a","stage4b","out"):ap.add_argument(n,type=Path)
@@ -58,9 +89,9 @@ def main():
         for key in dimension_keys(dict(season_start_year=s,stage=t)):stats[(p,*key)]
     def add(p,md,**values):
         for key in dimension_keys(md):stats[(p,*key)].update(values)
-    fields=["draw_event_id","event_order","kyoku_id","game_id","game_date","season_start_year","stage","player_id","state","recorded_shanten","physical_shanten","state_event_id","furiten","status","is_dontsuka","is_shoubute","concealed_before","melds","omote","wait_candidates","patterns","error"]
+    fields=["draw_event_id","event_order","kyoku_id","game_id","game_date","season_start_year","stage","player_id","state","recorded_shanten","physical_shanten","state_event_id","furiten","status","is_dontsuka","is_shoubute","resolution","concealed_before","melds","omote","wait_candidates","patterns","error"]
     with gzip.open(a.out/"all_draw_coverage.csv.gz","wt",encoding="utf-8",newline="") as af,gzip.open(a.out/"tenpai_draw_details.csv.gz","wt",encoding="utf-8",newline="") as tf,(a.out/"shoubute_dontsuka.csv").open("w",encoding="utf-8-sig",newline="") as df,(a.out/"shoubute_opponent_details.csv").open("w",encoding="utf-8-sig",newline="") as of:
-        aw=csv.DictWriter(af,fieldnames=fields[:16],extrasaction="ignore");tw=csv.DictWriter(tf,fieldnames=fields,extrasaction="ignore");dw=csv.DictWriter(df,fieldnames=fields+["opponents","actual_ron_links"],extrasaction="ignore")
+        aw=csv.DictWriter(af,fieldnames=fields[:17],extrasaction="ignore");tw=csv.DictWriter(tf,fieldnames=fields,extrasaction="ignore");dw=csv.DictWriter(df,fieldnames=fields+["opponents","actual_ron_links"],extrasaction="ignore")
         ow=csv.DictWriter(of,fieldnames=list(orig[0]),extrasaction="ignore")
         for w in (aw,tw,dw,ow):w.writeheader()
         for i,(ky,md) in enumerate(sorted(meta.items()),1):
@@ -81,16 +112,23 @@ def main():
                         state=ps.get(p);snap=ts.get(p);h=rp.hands[p];m=rp.melds[p]
                         r=dict(draw_event_id=eid,event_order=ev["event_order"],kyoku_id=ky,**md,player_id=p,is_dontsuka=int(bool(rows)),status="evaluated",is_shoubute=0,recorded_shanten=state["shanten_count"] if state else None,state_event_id=state["event_id"] if state else None)
                         try:
-                            if len(h)+3*len(m)!=13:raise ValueError("pre-draw effective tiles")
+                            if len(h)+3*len(m)!=13:
+                                r["resolution"]="observation_limit_invalid_recorded_tile_count"
+                                raise ValueError("pre-draw effective tiles")
                             q=sh(vector(h));r["physical_shanten"]=q
                             if q<0:raise ValueError("winning shape before draw")
                             if q==0 and candidates(h,m):
                                 reached=p in rp.reaches
                                 typ="riichi" if reached else "open" if any(k!="ankan" for k,b in m) else "damaten"
                                 r.update(state=typ,concealed_before=js(h),melds=js(m),omote=js(rp.omote))
-                                if not state or not snap or snap["event_order"]<state["event_order"] or snap["is_furiten"] is None:raise ValueError("missing current tenpai/furiten evidence")
-                                if state["shanten_count"]!=0:raise ValueError("physical/recorded tenpai disagreement")
-                                furiten=bool(snap["is_furiten"]);r["furiten"]=int(furiten)
+                                if state and state["shanten_count"]!=0 and kan_transition(rp,ev,p,state):
+                                    furiten=new_kan_furiten(rp,ev,p,state,h,m)
+                                    r["resolution"]="kan_new_tenpai_reconstructed_furiten"
+                                else:
+                                    if not state or not snap or snap["event_order"]<state["event_order"] or snap["is_furiten"] is None:raise ValueError("missing current tenpai/furiten evidence")
+                                    if state["shanten_count"]!=0:raise ValueError("physical/recorded tenpai disagreement")
+                                    furiten=bool(snap["is_furiten"])
+                                r["furiten"]=int(furiten)
                                 waits,patterns,ok=evaluate_waits(h,m,winds[p],rw,rp.omote,reached,reached and rp.declarations.get(p,False),furiten)
                                 r.update(wait_candidates=js(waits),patterns=js(patterns),is_shoubute=int(ok))
                                 if not patterns:raise ValueError("no wait patterns")
@@ -113,7 +151,14 @@ def main():
                                         if len(rows)>1:examples.setdefault("multiple_opponents",r.copy())
                             else:
                                 r["state"]="not_tenpai"
-                                if state and state["shanten_count"]==0:raise ValueError("recorded/physical non-tenpai disagreement")
+                                if state and state["shanten_count"]==0:
+                                    if q>0 and kan_transition(rp,ev,p,state):
+                                        r["resolution"]="kan_stale_tenpai_physical_non_tenpai"
+                                    elif q==0 and no_physical_wait(h,m):
+                                        r.update(state="structural_tenpai_no_physical_wait",resolution="all_shape_waits_own_four",concealed_before=js(h),melds=js(m),wait_candidates=js([]))
+                                        counts["structural_tenpai_no_physical_wait"]+=1
+                                        tw.writerow(r)
+                                    else:raise ValueError("recorded/physical non-tenpai disagreement")
                         except Exception as ex:
                             r.update(status="unresolved",is_shoubute="",error=repr(ex),concealed_before=js(h),melds=js(m),omote=js(rp.omote))
                             errors.append(r.copy())

@@ -68,6 +68,44 @@ jobs:
         run: |
           set -o pipefail
           python -u scripts/dontsuka_v026_5a.py /tmp/mahjong-fixed.sqlite3 /tmp/approved2a.zip /tmp/approved2b.zip /tmp/approved3a.zip /tmp/approved3b.zip /tmp/approved4a.zip /tmp/approved4b.zip results/dontsuka_v026_5a 2>&1 | tee results/dontsuka_v026_5a/audit.log
+      - name: Compare corrected output to original 192 cases
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh api /repos/${{ github.repository }}/actions/artifacts/15255583466/zip > /tmp/original5a.zip
+          echo '23207b8e84e0fbb14633204fd297bab36936b1bdc3a12b1bc7e28e4a60a5a95b  /tmp/original5a.zip' | sha256sum -c
+          python - <<'PY'
+          import csv,gzip,io,json,zipfile
+          from pathlib import Path
+          out=Path('results/dontsuka_v026_5a')
+          with zipfile.ZipFile('/tmp/original5a.zip') as z:
+              old=list(csv.DictReader(io.StringIO(z.read('unresolved_and_discrepancies.csv').decode('utf-8-sig'))))
+              om=json.loads(z.read('manifest.json'))
+              oldcov=z.read('all_draw_coverage.csv.gz')
+          assert len(old)==192
+          ids={r['draw_event_id'] for r in old}
+          new={}
+          with gzip.open(out/'all_draw_coverage.csv.gz','rt',encoding='utf-8') as f, gzip.open(io.BytesIO(oldcov),'rt',encoding='utf-8') as g:
+              from itertools import zip_longest
+              changed_outside=[]
+              for a,b in zip_longest(csv.DictReader(f),csv.DictReader(g)):
+                  assert a and b and a['draw_event_id']==b['draw_event_id']
+                  if a['draw_event_id'] in ids:new[a['draw_event_id']]=a
+                  elif any(a.get(k)!=b.get(k) for k in b):changed_outside.append(a['draw_event_id'])
+          assert len(new)==192
+          rows=[dict(r,new_status=new[r['draw_event_id']]['status'],new_state=new[r['draw_event_id']]['state'],new_shoubute=new[r['draw_event_id']]['is_shoubute'],new_furiten=new[r['draw_event_id']]['furiten'],resolution=new[r['draw_event_id']]['resolution']) for r in old]
+          with (out/'original_192_resolution.csv').open('w',encoding='utf-8-sig',newline='') as f:
+              wr=csv.DictWriter(f,fieldnames=list(dict.fromkeys(k for r in rows for k in r)));wr.writeheader();wr.writerows(rows)
+          nm=json.loads((out/'manifest.json').read_text())
+          from collections import Counter
+          d=dict(original_cases=len(rows),new_status=dict(Counter(r['new_status'] for r in rows)),resolution=dict(Counter(r['resolution'] for r in rows)),outside_original_changed=len(changed_outside),outside_original_ids=changed_outside,old_counts=om['counts'],new_counts=nm['counts'],old_overall=om['overall'],new_overall=nm['overall'])
+          (out/'comparison.json').write_text(json.dumps(d,ensure_ascii=False,indent=2))
+          print(json.dumps(d,ensure_ascii=False))
+          assert not changed_outside,'unexpected change outside 192'
+          PY
       - name: Finalize manifest after logs close
         if: always()
         run: |
