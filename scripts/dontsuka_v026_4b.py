@@ -3,7 +3,7 @@ import argparse,json,os,traceback
 from collections import Counter,defaultdict
 from pathlib import Path
 from dontsuka_v026_extract import connect_readonly,verify_database,sha256_file
-from dontsuka_v026_2a_audit import events
+from dontsuka_v026_2a_audit import events,evaluate
 from dontsuka_v026_2a_replay import Replay,normal,tile
 from dontsuka_v026_2b_replay import RELEASE,DB_SHA,ranks
 from dontsuka_v026_3b import verified_zip,read_csv_zip,write_csv,rates,STAGE3A_SHA,STAGE2B_SHA
@@ -28,6 +28,8 @@ class RonState:
     """
     def __init__(self,c,ky):
         self.rp=Replay();self.ps={};self.ts={};self.wait={};self.last_stable={}
+        self.winds={int(r[0]):r[1] for r in c.execute("SELECT player_id,player_wind FROM kyoku_player_result WHERE kyoku_id=?",(ky,))}
+        self.round_wind=c.execute("SELECT round FROM kyoku WHERE id=?",(ky,)).fetchone()[0][:2]
         self.actions=group((dict(r) for r in c.execute("""SELECT ps.*,e.event_order FROM player_state ps JOIN event e ON e.id=ps.event_id WHERE e.kyoku_id=?""",(ky,))),lambda r:r["event_id"])
         self.snaps=group((dict(r) for r in c.execute("""SELECT ps.*,e.event_order FROM player_tenpai_state ps JOIN event e ON e.id=ps.event_id WHERE e.kyoku_id=?""",(ky,))),lambda r:r["event_id"])
         self.matrix=group((dict(r) for r in c.execute("""SELECT m.event_id,m.player_id,m.waiting_tile,m.is_ron_agari FROM tenpai_agari_matrix m JOIN event e ON e.id=m.event_id WHERE e.kyoku_id=?""",(ky,))),lambda r:(r["event_id"],r["player_id"]))
@@ -46,7 +48,27 @@ class RonState:
         elif s["is_furiten"]:d.update(legal=False,reason="furiten")
         else:
             ms=self.matrix.get((s["event_id"],p),[])
-            if not ms:d.update(reason="missing_ron_matrix")
+            if not ms:
+                # The matrix may have no rows even for a recorded tenpai.
+                # Reconstruct ordinary ron from the physical 13-tile hand;
+                # retain the observed furiten decision and all evaluation evidence.
+                raw=sorted({t for q,hh in self.rp.hands.items() if q!=p for t in hh if normal(t)==typ})
+                checks=[]
+                reached=p in self.rp.reaches
+                flags=dict(is_tsumo=False,is_riichi=reached,is_daburu_riichi=reached and self.rp.declarations.get(p,False),
+                    is_ippatsu=reached and p in self.rp.ippatsu,is_rinshan=False,is_chankan=False,
+                    is_haitei=False,is_houtei=self.rp.wall==0,first_uninterrupted=False)
+                for t in raw:
+                    try:
+                        v=evaluate(h+[t],m,t,flags,self.winds[p],self.round_wind,list(self.rp.omote),[])
+                        checks.append(dict(tile=t,legal=True,yaku=v["yaku"]))
+                    except ValueError as ex:
+                        msg=str(ex)
+                        checks.append(dict(tile=t,legal=False if msg in ("hand calculator: no_yaku","hand calculator: hand_not_winning") else None,error=msg))
+                d["fallback_evidence"]=dict(hand=h.copy(),melds=m.copy(),flags=flags,checks=checks)
+                if any(x["legal"] is True for x in checks):d.update(legal=True,reason="reconstructed_ordinary_ron")
+                elif checks and all(x["legal"] is False for x in checks):d.update(legal=False,reason="reconstructed_no_ordinary_ron")
+                else:d.update(reason="missing_ron_matrix_unresolved")
             else:
                 valid=any(normal(tile(r["waiting_tile"]))==typ and r["is_ron_agari"]==1 for r in ms)
                 d.update(legal=valid,reason="ordinary_ron" if valid else "no_ordinary_ron_for_type")
@@ -79,7 +101,7 @@ def main():
     old_round=read_csv_zip(z4,"dontsuka_kyoku_classification.csv")
     orig3=read_csv_zip(z3,"opponent_hypothetical_all.csv")
     bykey={origin_key(r):r for r in origins};base={origin_key(r):r for r in orig3}
-    if len(origins)!=len(bykey)!=28060:raise ValueError("origin duplicates")
+    if len(origins)!=28060 or len(bykey)!=28060:raise ValueError("origin duplicates")
     if set(bykey)!=set(base) or len(bykey)!=28060 or len({k[0] for k in bykey})!=27578:raise ValueError("origin identity")
     for k,o in bykey.items():
         if any(o[f]!=base[k][f] for f in ("kyoku_id","drawer","target","tile","rank_drop","event_order")):raise ValueError("origin changed")
@@ -112,7 +134,7 @@ def main():
     meta={int(r[0]):dict(game_id=int(r[1]),game_date=r[2],season_start_year=int(r[3]),stage=r[4]) for r in c.execute("""SELECT k.id,g.id,g.date,ls.start_year,ss.stage FROM kyoku k JOIN game g ON g.id=k.game_id JOIN season_stage ss ON ss.id=g.season_stage_id JOIN league_season ls ON ls.id=ss.league_season_id""")}
     names={int(r[0]):r[1] for r in c.execute("SELECT id,name FROM player")}
     if (len(meta),len({m["game_id"] for m in meta.values()}),len(names),c.execute("SELECT count(*) FROM draw_event").fetchone()[0])!=(25238,2068,56,1257732):raise ValueError("DB counts")
-    timeline=[];rounds=[];decisions=[];uncertain=[];errors=[];examples={}
+    timeline=[];rounds=[];decisions=[];uncertain=[];errors=[];examples={};fallback=[];fallback_seen=set()
     for idx,(ky,ks) in enumerate(sorted(byky.items())):
         ev=None
         try:
@@ -164,6 +186,10 @@ def main():
                         if not active_at(o,order):continue
                         pair=(int(o["target"]),o["tile_type"])
                         d=rs.detail(*pair);eligible[pair]=d["legal"];evidence[origin_key(o)]=d;active.append(o)
+                        if "fallback_evidence" in d:
+                            fk=(ky,eid,k[1],*pair)
+                            if fk not in fallback_seen:
+                                fallback_seen.add(fk);fallback.append(dict(**info(k),event_id=eid,target=pair[0],tile_type=pair[1],evidence=js(d)))
                         n=sum(normal(t)==o["tile_type"] for t in rs.rp.hands[k[1]])
                         if n<=0:raise ValueError("4A active interval replay mismatch")
                     s=state(os_,order,eligible)
@@ -218,8 +244,9 @@ def main():
     emit(a.out,"metrics_all_scopes.csv",totals,["scope"])
     emit(a.out,"discrepancies.csv",errors,["kyoku_id","event_id","error"])
     emit(a.out,"unresolved.csv",uncertain,["kyoku_id","player_id","event_id","reason"])
+    emit(a.out,"matrix_reconstruction.csv",fallback,["kyoku_id","player_id","event_id","target","tile_type","evidence"])
     (a.out/"real_examples.json").write_text(js(examples),encoding="utf-8")
-    manifest=dict(scope="Stage 4B only",status="incomplete" if errors or uncertain else "computed",database=dbm,database_sha256=DB_SHA,approved_origin_count=len(origins),approved_change_count=len(changes),approved_link_count=len(links),candidate_player_rounds=len(candidates),candidate_rounds=len(byky),error_count=len(errors),unresolved_count=len(uncertain),counts=overall,notes=["ordinary ron state follows approved Stage 1 snapshot and action freshness; physical 13-effective-tile waiting state required","closed non-tenpai or unknown selection not inferred","results provisional when unresolved or errors exist"])
+    manifest=dict(scope="Stage 4B only",status="incomplete" if errors or uncertain else "computed",database=dbm,database_sha256=DB_SHA,approved_origin_count=len(origins),approved_change_count=len(changes),approved_link_count=len(links),candidate_player_rounds=len(candidates),candidate_rounds=len(byky),error_count=len(errors),unresolved_count=len(uncertain),matrix_reconstruction_count=len(fallback),counts=overall,notes=["ordinary ron state follows approved Stage 1 snapshot and action freshness; physical 13-effective-tile waiting state required","closed non-tenpai or unknown selection not inferred","results provisional when unresolved or errors exist"])
     (a.out/"manifest.json").write_text(json.dumps(manifest,ensure_ascii=False,indent=2)+"\n",encoding="utf-8")
     print(json.dumps(manifest,ensure_ascii=False),flush=True)
     if errors or uncertain:raise SystemExit(1)
